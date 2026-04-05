@@ -1,0 +1,5 @@
+pyrogram==2.0.106
+tgcrypto==1.2.5
+python-dotenv==1.2.1
+opentele==1.15.1
+telethon==1.42.0

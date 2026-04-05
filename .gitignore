@@ -2,5 +2,7 @@ sessions/
 logs/
 .env
 venv/
+tdata/
+temp_sessions/
 __pycache__/
 *.pyc
