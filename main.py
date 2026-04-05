@@ -1,7 +1,8 @@
 import asyncio
 from datetime import datetime
 from watcher import run_session
-from notifier import bot
+from bot import bot
+import handlers
 from logger import get_logger
 from config import SCHEDULE_HOURS
 

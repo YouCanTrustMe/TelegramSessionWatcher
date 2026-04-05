@@ -4,7 +4,7 @@ import random
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait
 from config import API_ID, API_HASH, SESSIONS_DIR
-from notifier import send_notification
+from bot import send_notification
 from logger import get_logger
 
 log = get_logger(__name__)
