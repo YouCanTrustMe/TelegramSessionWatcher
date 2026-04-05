@@ -1,6 +1,8 @@
 import os
 import glob
 import sqlite3
+import pyzipper
+import tempfile
 from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -8,6 +10,9 @@ from bot import bot, owner_filter
 from converter import convert_to_tdata
 from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID
 from logger import get_logger
+from config import BACKUP_PASSWORD
+
+GITIGNORE_PATHS = ["sessions", ".env", "logs"]
 
 log = get_logger(__name__)
 
@@ -252,3 +257,51 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
     del pending_auth[OWNER_ID]
     log.info(f"Account added via bot: {new_name}")
     await message.reply(f"✅ Account added: `{new_name}`")
+
+@bot.on_message(filters.command("backup") & owner_filter)
+async def backup_cmd(client: Client, message: Message):
+    await message.reply("Creating backup...")
+
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    zip_path = os.path.join(tempfile.gettempdir(), f"tsw_backup_{date_str}.zip")
+
+    with pyzipper.AESZipFile(zip_path, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
+        zf.setpassword(BACKUP_PASSWORD.encode())
+
+        for path in GITIGNORE_PATHS:
+            if not os.path.exists(path):
+                continue
+            if os.path.isfile(path):
+                zf.write(path, path)
+            elif os.path.isdir(path):
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        zf.write(file_path, file_path)
+
+    await message.reply_document(zip_path, caption="🔐 Backup")
+    os.remove(zip_path)
+    log.info("Backup created and sent")
+
+@bot.on_message(filters.command("restore") & owner_filter)
+async def restore_cmd(client: Client, message: Message):
+    if not message.reply_to_message or not message.reply_to_message.document:
+        await message.reply("Reply to a backup zip file with /restore")
+        return
+
+    await message.reply("Restoring backup...")
+
+    zip_path = os.path.join(tempfile.gettempdir(), "tsw_restore.zip")
+    await message.reply_to_message.download(zip_path)
+
+    try:
+        with pyzipper.AESZipFile(zip_path, "r") as zf:
+            zf.setpassword(BACKUP_PASSWORD.encode())
+            zf.extractall(".")
+        await message.reply("✅ Backup restored.")
+        log.info("Backup restored")
+    except Exception as e:
+        await message.reply(f"❌ Restore failed: {e}")
+        log.error(f"Restore failed: {e}")
+    finally:
+        os.remove(zip_path)
