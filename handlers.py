@@ -1,6 +1,7 @@
 import os
 import glob
 import sqlite3
+import asyncio
 import pyzipper
 import tempfile
 from datetime import datetime
@@ -8,9 +9,8 @@ from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import bot, owner_filter
 from converter import convert_to_tdata
-from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID
+from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID, BACKUP_PASSWORD
 from logger import get_logger
-from config import BACKUP_PASSWORD
 
 GITIGNORE_PATHS = ["sessions", ".env", "logs"]
 
@@ -18,10 +18,13 @@ log = get_logger(__name__)
 
 pending_auth = {}
 PAGE_SIZE = 10
+_backup_task: asyncio.Task | None = None
+
 
 def get_session_names() -> list:
     sessions = glob.glob(os.path.join(SESSIONS_DIR, "*.session"))
     return sorted([os.path.basename(s).replace(".session", "") for s in sessions])
+
 
 def build_pagination(names: list, page: int, action: str) -> tuple:
     total = len(names)
@@ -53,6 +56,57 @@ def build_pagination(names: list, page: int, action: str) -> tuple:
     markup = InlineKeyboardMarkup(buttons) if buttons else None
     return text, markup
 
+
+async def do_backup() -> None:
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    zip_path = os.path.join(tempfile.gettempdir(), f"tsw_backup_{date_str}.zip")
+
+    stats: dict[str, int] = {}
+    total_files = 0
+    for path in GITIGNORE_PATHS:
+        if not os.path.exists(path):
+            continue
+        if os.path.isfile(path):
+            stats[path] = 1
+            total_files += 1
+        elif os.path.isdir(path):
+            count = sum(len(files) for _, _, files in os.walk(path))
+            stats[path] = count
+            total_files += count
+
+    with pyzipper.AESZipFile(zip_path, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
+        zf.setpassword(BACKUP_PASSWORD.encode())
+        for path in GITIGNORE_PATHS:
+            if not os.path.exists(path):
+                continue
+            if os.path.isfile(path):
+                zf.write(path, path)
+            elif os.path.isdir(path):
+                for root, dirs, files in os.walk(path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        zf.write(file_path, file_path)
+
+    lines = [f"📦 `tsw_backup_{date_str}.zip`\n"]
+    for path, count in stats.items():
+        if os.path.isdir(path):
+            lines.append(f"📁 {path}/ — {count} file(s)")
+        else:
+            lines.append(f"📄 {path}")
+    lines.append(f"\n🗂 Total: {total_files} file(s)")
+    caption = "\n".join(lines)
+
+    await bot.send_document(OWNER_ID, zip_path, caption=caption)
+    os.remove(zip_path)
+    log.info("Backup created and sent")
+
+
+async def schedule_backup_after_add() -> None:
+    await asyncio.sleep(180)
+    log.info("Auto backup triggered after /add")
+    await do_backup()
+
+
 @bot.on_message(filters.command("list") & owner_filter)
 async def list_accounts(client: Client, message: Message):
     names = get_session_names()
@@ -61,6 +115,7 @@ async def list_accounts(client: Client, message: Message):
         return
     text, markup = build_pagination(names, 0, "list")
     await message.reply(text, reply_markup=markup)
+
 
 @bot.on_message(filters.command("remove") & owner_filter)
 async def remove_account(client: Client, message: Message):
@@ -83,6 +138,7 @@ async def remove_account(client: Client, message: Message):
     text, markup = build_pagination(names, 0, "remove")
     await message.reply(text, reply_markup=markup)
 
+
 @bot.on_message(filters.command("convert") & owner_filter)
 async def convert_account_cmd(client: Client, message: Message):
     parts = message.text.split(maxsplit=1)
@@ -97,6 +153,7 @@ async def convert_account_cmd(client: Client, message: Message):
     text, markup = build_pagination(names, 0, "convert")
     await message.reply(text, reply_markup=markup)
 
+
 @bot.on_callback_query(filters.regex(r'^page:'))
 async def handle_pagination(client: Client, callback: CallbackQuery):
     _, action, page = callback.data.split(":")
@@ -105,6 +162,7 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     text, markup = build_pagination(names, page, action)
     await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
+
 
 @bot.on_callback_query(filters.regex(r'^remove:'))
 async def handle_remove_callback(client: Client, callback: CallbackQuery):
@@ -118,12 +176,14 @@ async def handle_remove_callback(client: Client, callback: CallbackQuery):
     await callback.message.edit_text(f"✅ Account `{session_name}` removed.")
     await callback.answer()
 
+
 @bot.on_callback_query(filters.regex(r'^convert:'))
 async def handle_convert_callback(client: Client, callback: CallbackQuery):
     session_name = callback.data.split(":", 1)[1]
     await callback.message.edit_text(f"Converting `{session_name}`...")
     await callback.answer()
     await do_convert(callback.message, session_name)
+
 
 async def do_convert(message: Message, session_name: str):
     await message.reply(f"Converting `{session_name}`...")
@@ -135,12 +195,14 @@ async def do_convert(message: Message, session_name: str):
     os.remove(zip_path)
     log.info(f"tdata sent and removed: {session_name}")
 
+
 @bot.on_message(filters.command("run") & owner_filter)
 async def run_session_cmd(client: Client, message: Message):
     from watcher import run_session
     await message.reply("Starting session manually...")
     await run_session()
     await message.reply("✅ Session completed.")
+
 
 @bot.on_message(filters.command("info") & owner_filter)
 async def info_account(client: Client, message: Message):
@@ -179,10 +241,12 @@ async def info_account(client: Client, message: Message):
         f"Last modified: `{modified}`"
     )
 
+
 @bot.on_message(filters.command("add") & owner_filter)
 async def add_account_cmd(client: Client, message: Message):
     await message.reply("Send phone number (e.g. +380XXXXXXXXX):")
     pending_auth[OWNER_ID] = {"step": "phone"}
+
 
 @bot.on_message(owner_filter & filters.text & ~filters.regex(r'^/'))
 async def handle_auth_input(client: Client, message: Message):
@@ -240,7 +304,10 @@ async def handle_auth_input(client: Client, message: Message):
             del pending_auth[OWNER_ID]
             await message.reply(f"Wrong 2FA password: {e}")
 
+
 async def finish_auth(message: Message, auth_client: Client, state: dict):
+    global _backup_task
+
     me = await auth_client.get_me()
     first = me.first_name or ""
     last = me.last_name or ""
@@ -256,32 +323,18 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
 
     del pending_auth[OWNER_ID]
     log.info(f"Account added via bot: {new_name}")
-    await message.reply(f"✅ Account added: `{new_name}`")
+    await message.reply(f"✅ Account added: `{new_name}`\n⏳ Backup in 3 minutes...")
+
+    if _backup_task and not _backup_task.done():
+        _backup_task.cancel()
+    _backup_task = asyncio.create_task(schedule_backup_after_add())
+
 
 @bot.on_message(filters.command("backup") & owner_filter)
 async def backup_cmd(client: Client, message: Message):
     await message.reply("Creating backup...")
+    await do_backup()
 
-    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    zip_path = os.path.join(tempfile.gettempdir(), f"tsw_backup_{date_str}.zip")
-
-    with pyzipper.AESZipFile(zip_path, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
-        zf.setpassword(BACKUP_PASSWORD.encode())
-
-        for path in GITIGNORE_PATHS:
-            if not os.path.exists(path):
-                continue
-            if os.path.isfile(path):
-                zf.write(path, path)
-            elif os.path.isdir(path):
-                for root, dirs, files in os.walk(path):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        zf.write(file_path, file_path)
-
-    await message.reply_document(zip_path, caption="🔐 Backup")
-    os.remove(zip_path)
-    log.info("Backup created and sent")
 
 @bot.on_message(filters.command("restore") & owner_filter)
 async def restore_cmd(client: Client, message: Message):
