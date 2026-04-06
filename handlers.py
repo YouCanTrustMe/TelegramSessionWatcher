@@ -20,10 +20,31 @@ pending_auth = {}
 PAGE_SIZE = 10
 _backup_task: asyncio.Task | None = None
 
+CANCEL_MARKUP = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="auth:cancel")]])
+
 
 def get_session_names() -> list:
     sessions = glob.glob(os.path.join(SESSIONS_DIR, "*.session"))
     return sorted([os.path.basename(s).replace(".session", "") for s in sessions])
+
+
+def cleanup_pending(user_id: int):
+    state = pending_auth.pop(user_id, None)
+    if not state:
+        return
+    client = state.get("client")
+    if client:
+        try:
+            asyncio.create_task(client.disconnect())
+        except Exception:
+            pass
+    session_path = state.get("session_path")
+    if session_path:
+        for ext in ["", ".session", ".session-journal"]:
+            path = f"{session_path}{ext}"
+            if os.path.exists(path):
+                os.remove(path)
+                log.info(f"Removed incomplete session file: {path}")
 
 
 def build_pagination(names: list, page: int, action: str) -> tuple:
@@ -115,6 +136,25 @@ async def list_accounts(client: Client, message: Message):
         return
     text, markup = build_pagination(names, 0, "list")
     await message.reply(text, reply_markup=markup)
+
+
+@bot.on_message(filters.command("cancel") & owner_filter)
+async def cancel_cmd(client: Client, message: Message):
+    if OWNER_ID in pending_auth:
+        cleanup_pending(OWNER_ID)
+        await message.reply("❌ Cancelled. Incomplete session files removed.")
+    else:
+        await message.reply("Nothing to cancel.")
+
+
+@bot.on_callback_query(filters.regex(r'^auth:cancel$'))
+async def handle_auth_cancel(client: Client, callback: CallbackQuery):
+    if OWNER_ID in pending_auth:
+        cleanup_pending(OWNER_ID)
+        await callback.message.edit_text("❌ Cancelled. Incomplete session files removed.")
+    else:
+        await callback.message.edit_text("Nothing to cancel.")
+    await callback.answer()
 
 
 @bot.on_message(filters.command("remove") & owner_filter)
@@ -244,7 +284,9 @@ async def info_account(client: Client, message: Message):
 
 @bot.on_message(filters.command("add") & owner_filter)
 async def add_account_cmd(client: Client, message: Message):
-    await message.reply("Send phone number (e.g. +380XXXXXXXXX):")
+    if OWNER_ID in pending_auth:
+        cleanup_pending(OWNER_ID)
+    await message.reply("Send phone number (e.g. +380XXXXXXXXX):", reply_markup=CANCEL_MARKUP)
     pending_auth[OWNER_ID] = {"step": "phone"}
 
 
@@ -270,11 +312,11 @@ async def handle_auth_input(client: Client, message: Message):
                 "client": auth_client,
                 "session_path": session_path
             }
-            await message.reply("Code sent. Enter the code from Telegram:")
+            await message.reply("Code sent. Enter the code from Telegram:", reply_markup=CANCEL_MARKUP)
         except Exception as e:
             await auth_client.disconnect()
             del pending_auth[OWNER_ID]
-            await message.reply(f"Error: {e}")
+            await message.reply(f"❌ Error sending code: {e}\n\nUse /add to try again.")
 
     elif state["step"] == "code":
         code = message.text.strip()
@@ -284,13 +326,16 @@ async def handle_auth_input(client: Client, message: Message):
             await auth_client.sign_in(state["phone"], state["hash"], code)
             await finish_auth(message, auth_client, state)
         except Exception as e:
-            if "password" in str(e).lower() or "2fa" in str(e).lower():
+            err = str(e).lower()
+            if "session_password_needed" in err or "password" in err or "2fa" in err:
                 pending_auth[OWNER_ID]["step"] = "2fa"
-                await message.reply("Enter 2FA password:")
+                await message.reply("Enter 2FA password:", reply_markup=CANCEL_MARKUP)
+            elif "phone_code_invalid" in err or "phone_code_expired" in err:
+                await message.reply("❌ Invalid or expired code. Please enter the code again:", reply_markup=CANCEL_MARKUP)
+                # state stays at "code" — user can retry
             else:
-                await auth_client.disconnect()
-                del pending_auth[OWNER_ID]
-                await message.reply(f"Error: {e}")
+                cleanup_pending(OWNER_ID)
+                await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
 
     elif state["step"] == "2fa":
         password = message.text.strip()
@@ -300,9 +345,13 @@ async def handle_auth_input(client: Client, message: Message):
             await auth_client.check_password(password)
             await finish_auth(message, auth_client, state)
         except Exception as e:
-            await auth_client.disconnect()
-            del pending_auth[OWNER_ID]
-            await message.reply(f"Wrong 2FA password: {e}")
+            err = str(e).lower()
+            if "password_hash_invalid" in err:
+                await message.reply("❌ Wrong password. Try again:", reply_markup=CANCEL_MARKUP)
+                # state stays at "2fa" — user can retry
+            else:
+                cleanup_pending(OWNER_ID)
+                await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
 
 
 async def finish_auth(message: Message, auth_client: Client, state: dict):
