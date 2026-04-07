@@ -1,9 +1,11 @@
 import os
 import glob
+import time
 import sqlite3
 import asyncio
 import pyzipper
 import tempfile
+import shutil
 from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -13,6 +15,7 @@ from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID, BACKUP_PASSWORD
 from logger import get_logger
 
 GITIGNORE_PATHS = ["sessions", ".env", "logs"]
+ARCHIVE_DIR = "sessions_archive"
 
 log = get_logger(__name__)
 
@@ -23,9 +26,13 @@ _backup_task: asyncio.Task | None = None
 CANCEL_MARKUP = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="auth:cancel")]])
 
 
-def get_session_names() -> list:
+def get_session_names(include_archived: bool = False) -> list:
     sessions = glob.glob(os.path.join(SESSIONS_DIR, "*.session"))
-    return sorted([os.path.basename(s).replace(".session", "") for s in sessions])
+    names = sorted([os.path.basename(s).replace(".session", "") for s in sessions])
+    if include_archived and os.path.isdir(ARCHIVE_DIR):
+        archived = glob.glob(os.path.join(ARCHIVE_DIR, "*.session"))
+        names += sorted([f"[archived] {os.path.basename(s).replace('.session', '')}" for s in archived])
+    return names
 
 
 def cleanup_pending(user_id: int):
@@ -78,22 +85,21 @@ def build_pagination(names: list, page: int, action: str) -> tuple:
     return text, markup
 
 
-async def do_backup() -> None:
-    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    zip_path = os.path.join(tempfile.gettempdir(), f"tsw_backup_{date_str}.zip")
-
-    stats: dict[str, int] = {}
+def _build_zip_sync(zip_path: str) -> tuple[list, list, int]:
+    dir_stats = []
+    file_list = []
     total_files = 0
+
     for path in GITIGNORE_PATHS:
         if not os.path.exists(path):
             continue
-        if os.path.isfile(path):
-            stats[path] = 1
-            total_files += 1
-        elif os.path.isdir(path):
-            count = sum(len(files) for _, _, files in os.walk(path))
-            stats[path] = count
+        if os.path.isdir(path):
+            count = sum(len(fs) for _, _, fs in os.walk(path))
+            dir_stats.append((path, count))
             total_files += count
+        elif os.path.isfile(path):
+            file_list.append(path)
+            total_files += 1
 
     with pyzipper.AESZipFile(zip_path, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
         zf.setpassword(BACKUP_PASSWORD.encode())
@@ -103,18 +109,26 @@ async def do_backup() -> None:
             if os.path.isfile(path):
                 zf.write(path, path)
             elif os.path.isdir(path):
-                for root, dirs, files in os.walk(path):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        zf.write(file_path, file_path)
+                for root, _, fs in os.walk(path):
+                    for f in fs:
+                        fp = os.path.join(root, f)
+                        zf.write(fp, fp)
 
-    lines = [f"📦 `tsw_backup_{date_str}.zip`\n"]
-    for path, count in stats.items():
-        if os.path.isdir(path):
-            lines.append(f"📁 {path}/ — {count} file(s)")
-        else:
-            lines.append(f"📄 {path}")
-    lines.append(f"\n🗂 Total: {total_files} file(s)")
+    return dir_stats, file_list, total_files
+
+
+async def do_backup() -> None:
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    zip_path = os.path.join(tempfile.gettempdir(), f"tsw_backup_{date_str}.zip")
+
+    dir_stats, file_list, total_files = await asyncio.to_thread(_build_zip_sync, zip_path)
+
+    lines = [f"**📦 `tsw_backup_{date_str}.zip`**\n"]
+    for path, count in dir_stats:
+        lines.append(f"📁 __{path}/__ — `{count}` file(s)")
+    for path in file_list:
+        lines.append(f"📄 `{path}`")
+    lines.append(f"\n> 🗂 Total: **{total_files}** file(s)")
     caption = "\n".join(lines)
 
     await bot.send_document(OWNER_ID, zip_path, caption=caption)
@@ -161,14 +175,7 @@ async def handle_auth_cancel(client: Client, callback: CallbackQuery):
 async def remove_account(client: Client, message: Message):
     parts = message.text.split(maxsplit=1)
     if len(parts) >= 2:
-        session_name = parts[1].strip()
-        session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
-        if not os.path.exists(session_path):
-            await message.reply(f"Session `{session_name}` not found.")
-            return
-        os.remove(session_path)
-        log.info(f"Account removed: {session_name}")
-        await message.reply(f"✅ Account `{session_name}` removed.")
+        await ask_remove_confirm(message, parts[1].strip())
         return
 
     names = get_session_names()
@@ -179,6 +186,49 @@ async def remove_account(client: Client, message: Message):
     await message.reply(text, reply_markup=markup)
 
 
+async def ask_remove_confirm(message: Message, session_name: str):
+    session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
+    if not os.path.exists(session_path):
+        await message.reply(f"Session `{session_name}` not found.")
+        return
+    markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Yes, archive", callback_data=f"confirm_remove:{session_name}"),
+            InlineKeyboardButton("❌ Cancel", callback_data="cancel_remove"),
+        ]
+    ])
+    await message.reply(
+        f"⚠️ Archive `{session_name}`?\n_Session will be moved to `{ARCHIVE_DIR}/`, not deleted._",
+        reply_markup=markup
+    )
+
+
+@bot.on_callback_query(filters.regex(r'^confirm_remove:'))
+async def handle_confirm_remove(client: Client, callback: CallbackQuery):
+    session_name = callback.data.split(":", 1)[1]
+    session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
+
+    if not os.path.exists(session_path):
+        await callback.answer("Not found.", show_alert=True)
+        return
+
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    archive_path = os.path.join(ARCHIVE_DIR, f"{session_name}.session")
+    if os.path.exists(archive_path):
+        archive_path = os.path.join(ARCHIVE_DIR, f"{session_name}_{int(time.time())}.session")
+
+    os.rename(session_path, archive_path)
+    log.info(f"Account archived: {session_name}")
+    await callback.message.edit_text(f"📦 Account `{session_name}` moved to archive.")
+    await callback.answer()
+
+
+@bot.on_callback_query(filters.regex(r'^cancel_remove$'))
+async def handle_cancel_remove(client: Client, callback: CallbackQuery):
+    await callback.message.edit_text("❌ Removal cancelled.")
+    await callback.answer()
+
+
 @bot.on_message(filters.command("convert") & owner_filter)
 async def convert_account_cmd(client: Client, message: Message):
     parts = message.text.split(maxsplit=1)
@@ -186,7 +236,7 @@ async def convert_account_cmd(client: Client, message: Message):
         await do_convert(message, parts[1].strip())
         return
 
-    names = get_session_names()
+    names = get_session_names(include_archived=True)
     if not names:
         await message.reply("No accounts found.")
         return
@@ -194,11 +244,77 @@ async def convert_account_cmd(client: Client, message: Message):
     await message.reply(text, reply_markup=markup)
 
 
+@bot.on_message(filters.command("info") & owner_filter)
+async def info_account_cmd(client: Client, message: Message):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) >= 2:
+        await do_info(message, parts[1].strip())
+        return
+
+    names = get_session_names(include_archived=True)
+    if not names:
+        await message.reply("No accounts found.")
+        return
+    text, markup = build_pagination(names, 0, "info")
+    await message.reply(text, reply_markup=markup)
+
+
+async def do_info(message: Message, session_name: str):
+    clean_name = session_name.removeprefix("[archived] ")
+    is_archived = session_name.startswith("[archived] ")
+    base_dir = ARCHIVE_DIR if is_archived else SESSIONS_DIR
+    session_path = os.path.join(base_dir, f"{clean_name}.session")
+
+    if not os.path.exists(session_path):
+        await message.reply(f"Session `{clean_name}` not found.")
+        return
+
+    try:
+        conn = sqlite3.connect(session_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT dc_id, user_id FROM sessions")
+        row = cursor.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        await message.reply("No data found in session.")
+        return
+
+    dc_id, user_id = row
+    size = os.path.getsize(session_path)
+    modified = datetime.fromtimestamp(os.path.getmtime(session_path)).strftime("%Y-%m-%d %H:%M")
+    status = "archived" if is_archived else "active"
+
+    await message.reply(
+        f"**Account info:**\n"
+        f"Name: `{clean_name}`\n"
+        f"Status: `{status}`\n"
+        f"User ID: `{user_id}`\n"
+        f"DC: `{dc_id}`\n"
+        f"Size: `{size} bytes`\n"
+        f"Last modified: `{modified}`"
+    )
+
+
+@bot.on_message(filters.command("log") & owner_filter)
+async def log_cmd(client: Client, message: Message):
+    now = datetime.now()
+    log_path = os.path.join("logs", str(now.year), f"{now.month:02d}", f"{now.strftime('%Y-%m-%d')}.log")
+
+    if not os.path.exists(log_path):
+        await message.reply("No log file found for today.")
+        return
+
+    await message.reply_document(log_path, caption=f"📋 Log for `{now.strftime('%Y-%m-%d')}`")
+
+
 @bot.on_callback_query(filters.regex(r'^page:'))
 async def handle_pagination(client: Client, callback: CallbackQuery):
     _, action, page = callback.data.split(":")
     page = int(page)
-    names = get_session_names()
+    include_archived = action in ("info", "convert")
+    names = get_session_names(include_archived=include_archived)
     text, markup = build_pagination(names, page, action)
     await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
@@ -207,14 +323,15 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
 @bot.on_callback_query(filters.regex(r'^remove:'))
 async def handle_remove_callback(client: Client, callback: CallbackQuery):
     session_name = callback.data.split(":", 1)[1]
-    session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
-    if not os.path.exists(session_path):
-        await callback.answer("Not found.", show_alert=True)
-        return
-    os.remove(session_path)
-    log.info(f"Account removed: {session_name}")
-    await callback.message.edit_text(f"✅ Account `{session_name}` removed.")
+    await ask_remove_confirm(callback.message, session_name)
     await callback.answer()
+
+
+@bot.on_callback_query(filters.regex(r'^info:'))
+async def handle_info_callback(client: Client, callback: CallbackQuery):
+    session_name = callback.data.split(":", 1)[1]
+    await callback.answer()
+    await do_info(callback.message, session_name)
 
 
 @bot.on_callback_query(filters.regex(r'^convert:'))
@@ -226,14 +343,15 @@ async def handle_convert_callback(client: Client, callback: CallbackQuery):
 
 
 async def do_convert(message: Message, session_name: str):
-    await message.reply(f"Converting `{session_name}`...")
-    zip_path = await convert_to_tdata(session_name)
+    clean_name = session_name.removeprefix("[archived] ")
+    await message.reply(f"Converting `{clean_name}`...")
+    zip_path = await convert_to_tdata(clean_name)
     if zip_path is None:
-        await message.reply(f"Session `{session_name}` not found.")
+        await message.reply(f"Session `{clean_name}` not found.")
         return
-    await message.reply_document(zip_path, caption=f"tdata for `{session_name}`")
+    await message.reply_document(zip_path, caption=f"tdata for `{clean_name}`")
     os.remove(zip_path)
-    log.info(f"tdata sent and removed: {session_name}")
+    log.info(f"tdata sent and removed: {clean_name}")
 
 
 @bot.on_message(filters.command("run") & owner_filter)
@@ -242,44 +360,6 @@ async def run_session_cmd(client: Client, message: Message):
     await message.reply("Starting session manually...")
     await run_session()
     await message.reply("✅ Session completed.")
-
-
-@bot.on_message(filters.command("info") & owner_filter)
-async def info_account(client: Client, message: Message):
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.reply("Usage: /info <session_name>")
-        return
-
-    session_name = parts[1].strip()
-    session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
-
-    if not os.path.exists(session_path):
-        await message.reply(f"Session `{session_name}` not found.")
-        return
-
-    conn = sqlite3.connect(session_path)
-    cursor = conn.cursor()
-    cursor.execute("SELECT dc_id, user_id FROM sessions")
-    row = cursor.fetchone()
-    conn.close()
-
-    if not row:
-        await message.reply("No data found in session.")
-        return
-
-    dc_id, user_id = row
-    size = os.path.getsize(session_path)
-    modified = datetime.fromtimestamp(os.path.getmtime(session_path)).strftime("%Y-%m-%d %H:%M")
-
-    await message.reply(
-        f"**Account info:**\n"
-        f"Name: `{session_name}`\n"
-        f"User ID: `{user_id}`\n"
-        f"DC: `{dc_id}`\n"
-        f"Size: `{size} bytes`\n"
-        f"Last modified: `{modified}`"
-    )
 
 
 @bot.on_message(filters.command("add") & owner_filter)
@@ -332,7 +412,6 @@ async def handle_auth_input(client: Client, message: Message):
                 await message.reply("Enter 2FA password:", reply_markup=CANCEL_MARKUP)
             elif "phone_code_invalid" in err or "phone_code_expired" in err:
                 await message.reply("❌ Invalid or expired code. Please enter the code again:", reply_markup=CANCEL_MARKUP)
-                # state stays at "code" — user can retry
             else:
                 cleanup_pending(OWNER_ID)
                 await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
@@ -348,7 +427,6 @@ async def handle_auth_input(client: Client, message: Message):
             err = str(e).lower()
             if "password_hash_invalid" in err:
                 await message.reply("❌ Wrong password. Try again:", reply_markup=CANCEL_MARKUP)
-                # state stays at "2fa" — user can retry
             else:
                 cleanup_pending(OWNER_ID)
                 await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
@@ -396,10 +474,26 @@ async def restore_cmd(client: Client, message: Message):
     zip_path = os.path.join(tempfile.gettempdir(), "tsw_restore.zip")
     await message.reply_to_message.download(zip_path)
 
+    tmp_dir = os.path.join(tempfile.gettempdir(), "tsw_restore_tmp")
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir)
+    os.makedirs(tmp_dir)
+
     try:
         with pyzipper.AESZipFile(zip_path, "r") as zf:
             zf.setpassword(BACKUP_PASSWORD.encode())
-            zf.extractall(".")
+            zf.extractall(tmp_dir)
+
+        for item in os.listdir(tmp_dir):
+            src = os.path.join(tmp_dir, item)
+            dst = item
+            if os.path.isdir(src):
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+
         await message.reply("✅ Backup restored.")
         log.info("Backup restored")
     except Exception as e:
@@ -407,3 +501,5 @@ async def restore_cmd(client: Client, message: Message):
         log.error(f"Restore failed: {e}")
     finally:
         os.remove(zip_path)
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)

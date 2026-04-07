@@ -3,6 +3,17 @@ import os
 from datetime import datetime
 from config import LOGS_DIR
 
+
+class FlushedFileHandler(logging.FileHandler):
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+        try:
+            os.fsync(self.stream.fileno())
+        except OSError:
+            pass
+
+
 def get_logger(name: str) -> logging.Logger:
     logger = logging.getLogger(name)
 
@@ -21,7 +32,7 @@ def get_logger(name: str) -> logging.Logger:
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, f"{now.strftime('%Y-%m-%d')}.log")
 
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler = FlushedFileHandler(log_file, encoding="utf-8")
     file_handler.setFormatter(formatter)
 
     console_handler = logging.StreamHandler()
