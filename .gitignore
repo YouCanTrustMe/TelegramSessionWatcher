@@ -1,12 +1,24 @@
-sessions/
-sessions_archive/
-logs/
-.env
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
 venv/
-tdata/
-temp_sessions/
 __pycache__/
 *.pyc
+
+# Secrets
+.env
+
+# Pyrogram sessions
 *.session
 *.session-journal
+
+# Runtime data — keep folder structure, ignore contents
+data/*
+!data/*/
+data/*/*
+!data/*/.gitkeep
+
+# Misc
 task*
