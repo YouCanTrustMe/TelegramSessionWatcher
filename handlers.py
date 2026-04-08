@@ -7,6 +7,7 @@ import pyzipper
 import tempfile
 import shutil
 from datetime import datetime
+from typing import Optional
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import bot, owner_filter
@@ -14,14 +15,14 @@ from converter import convert_to_tdata
 from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID, BACKUP_PASSWORD
 from logger import get_logger
 
-GITIGNORE_PATHS = ["sessions", ".env", "logs"]
+GITIGNORE_PATHS = ["sessions", "sessions_archive", ".env", "logs", "bot.session"]
 ARCHIVE_DIR = "sessions_archive"
 
 log = get_logger(__name__)
 
 pending_auth = {}
 PAGE_SIZE = 10
-_backup_task: asyncio.Task | None = None
+_backup_task: Optional[asyncio.Task] = None
 
 CANCEL_MARKUP = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="auth:cancel")]])
 

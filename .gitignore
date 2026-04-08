@@ -1,4 +1,5 @@
 sessions/
+sessions_archive/
 logs/
 .env
 venv/
@@ -6,4 +7,6 @@ tdata/
 temp_sessions/
 __pycache__/
 *.pyc
+*.session
+*.session-journal
 task*

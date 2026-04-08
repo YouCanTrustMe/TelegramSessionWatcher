@@ -1,6 +1,6 @@
 import asyncio
-import signal
 from datetime import datetime
+from typing import Optional
 from watcher import run_session
 from bot import bot
 from logger import get_logger
@@ -9,15 +9,12 @@ import handlers
 
 log = get_logger(__name__)
 
-_shutdown = False
-
 
 async def scheduler():
-    global _shutdown
-    last_session_run: str | None = None
-    last_backup_run: str | None = None
+    last_session_run: Optional[str] = None
+    last_backup_run: Optional[str] = None
 
-    while not _shutdown:
+    while True:
         now = datetime.now()
 
         if now.hour in SCHEDULE_HOURS:
@@ -25,14 +22,20 @@ async def scheduler():
             if key != last_session_run:
                 last_session_run = key
                 log.info(f"Running session at {now.strftime('%H:%M')}")
-                await run_session()
+                try:
+                    await run_session()
+                except Exception as e:
+                    log.error(f"run_session failed: {e}")
 
         if now.weekday() == BACKUP_DAY and now.hour == BACKUP_HOUR:
             key = now.strftime("%Y-%m-%d %H")
             if key != last_backup_run:
                 last_backup_run = key
                 log.info("Running scheduled backup")
-                await handlers.do_backup()
+                try:
+                    await handlers.do_backup()
+                except Exception as e:
+                    log.error(f"do_backup failed: {e}")
 
         await asyncio.sleep(30)
 
@@ -40,24 +43,13 @@ async def scheduler():
 async def main():
     log.info("TelegramSessionWatcher started")
     await bot.start()
-    log.info(f"Bot started: @{(await bot.get_me()).username}")
-
-    loop = asyncio.get_running_loop()
-
-    def handle_signal():
-        global _shutdown
-        log.info("Shutdown signal received, stopping...")
-        _shutdown = True
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, handle_signal)
-
-    await scheduler()
-
-    log.info("Stopping bot...")
-    await bot.stop()
-    log.info("Shutdown complete")
+    me = await bot.get_me()
+    log.info(f"Bot started: @{me.username}")
+    try:
+        await scheduler()
+    finally:
+        await bot.stop()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    bot.run(main())
