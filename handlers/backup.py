@@ -1,0 +1,120 @@
+import os
+import asyncio
+import tempfile
+import shutil
+from datetime import datetime
+import pyzipper
+from pyrogram import Client, filters
+from pyrogram.types import Message
+from bot import bot, owner_filter
+from config import OWNER_ID, BACKUP_PASSWORD, DATA_DIR
+from logger import get_logger
+
+log = get_logger(__name__)
+
+GITIGNORE_PATHS = [DATA_DIR, ".env", "bot.session"]
+
+
+def _build_zip_sync(zip_path: str) -> tuple[list, list, int]:
+    dir_stats = []
+    file_list = []
+    total_files = 0
+
+    for path in GITIGNORE_PATHS:
+        if not os.path.exists(path):
+            continue
+        if os.path.isdir(path):
+            count = sum(len(fs) for _, _, fs in os.walk(path))
+            dir_stats.append((path, count))
+            total_files += count
+        elif os.path.isfile(path):
+            file_list.append(path)
+            total_files += 1
+
+    with pyzipper.AESZipFile(zip_path, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
+        zf.setpassword(BACKUP_PASSWORD.encode())
+        for path in GITIGNORE_PATHS:
+            if not os.path.exists(path):
+                continue
+            if os.path.isfile(path):
+                zf.write(path, path)
+            elif os.path.isdir(path):
+                for root, _, fs in os.walk(path):
+                    for f in fs:
+                        fp = os.path.join(root, f)
+                        zf.write(fp, fp)
+
+    return dir_stats, file_list, total_files
+
+
+async def do_backup() -> None:
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    zip_path = os.path.join(tempfile.gettempdir(), f"tsw_backup_{date_str}.zip")
+
+    dir_stats, file_list, total_files = await asyncio.to_thread(_build_zip_sync, zip_path)
+
+    lines = [f"**📦 `tsw_backup_{date_str}.zip`**\n"]
+    for path, count in dir_stats:
+        lines.append(f"📁 __{path}/__ — `{count}` file(s)")
+    for path in file_list:
+        lines.append(f"📄 `{path}`")
+    lines.append(f"\n> 🗂 Total: **{total_files}** file(s)")
+    caption = "\n".join(lines)
+
+    await bot.send_document(OWNER_ID, zip_path, caption=caption)
+    os.remove(zip_path)
+    log.info("Backup created and sent")
+
+
+async def schedule_backup_after_add() -> None:
+    await asyncio.sleep(180)
+    log.info("Auto backup triggered after /add")
+    await do_backup()
+
+
+@bot.on_message(filters.command("backup") & owner_filter)
+async def backup_cmd(client: Client, message: Message):
+    await message.reply("Creating backup...")
+    await do_backup()
+
+
+@bot.on_message(filters.command("restore") & owner_filter)
+async def restore_cmd(client: Client, message: Message):
+    if not message.reply_to_message or not message.reply_to_message.document:
+        await message.reply("Reply to a backup zip file with /restore")
+        return
+
+    await message.reply("Restoring backup...")
+
+    zip_path = os.path.join(tempfile.gettempdir(), "tsw_restore.zip")
+    await message.reply_to_message.download(zip_path)
+
+    tmp_dir = os.path.join(tempfile.gettempdir(), "tsw_restore_tmp")
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir)
+    os.makedirs(tmp_dir)
+
+    try:
+        with pyzipper.AESZipFile(zip_path, "r") as zf:
+            zf.setpassword(BACKUP_PASSWORD.encode())
+            zf.extractall(tmp_dir)
+
+        for item in os.listdir(tmp_dir):
+            src = os.path.join(tmp_dir, item)
+            dst = item
+            if os.path.isdir(src):
+                if os.path.exists(dst):
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+
+        await message.reply("✅ Backup restored.")
+        log.info("Backup restored")
+    except Exception as e:
+        await message.reply(f"❌ Restore failed: {e}")
+        log.error(f"Restore failed: {e}")
+    finally:
+        os.remove(zip_path)
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)

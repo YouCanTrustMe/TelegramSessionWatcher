@@ -6,10 +6,7 @@ from typing import Optional
 from telethon import TelegramClient
 from opentele.td import TDesktop
 from opentele.api import UseCurrentSession
-from config import SESSIONS_DIR, API_ID, API_HASH
-
-TDATA_DIR = "tdata"
-TEMP_DIR = "temp_sessions"
+from config import SESSIONS_DIR, API_ID, API_HASH, TDATA_DIR, TEMP_DIR
 
 def pyrogram_to_telethon(pyrogram_path: str, telethon_path: str):
     conn = sqlite3.connect(f"{pyrogram_path}.session")
@@ -80,8 +77,9 @@ def pyrogram_to_telethon(pyrogram_path: str, telethon_path: str):
     telethon_conn.commit()
     telethon_conn.close()
 
-async def convert_to_tdata(session_name: str) -> Optional[str]:
-    session_path = os.path.join(SESSIONS_DIR, session_name)
+async def convert_to_tdata(session_name: str, source_dir: str = None) -> Optional[str]:
+    base_dir = source_dir if source_dir else SESSIONS_DIR
+    session_path = os.path.join(base_dir, session_name)
 
     if not os.path.exists(f"{session_path}.session"):
         return None
