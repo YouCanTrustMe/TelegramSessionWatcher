@@ -31,6 +31,9 @@ def _build_zip_sync(zip_path: str) -> tuple[list, list, int]:
             file_list.append(path)
             total_files += 1
 
+    if not BACKUP_PASSWORD:
+        raise ValueError("BACKUP_PASSWORD is not set in .env")
+
     with pyzipper.AESZipFile(zip_path, "w", compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
         zf.setpassword(BACKUP_PASSWORD.encode())
         for path in GITIGNORE_PATHS:
@@ -93,6 +96,10 @@ async def restore_cmd(client: Client, message: Message):
     if os.path.exists(tmp_dir):
         shutil.rmtree(tmp_dir)
     os.makedirs(tmp_dir)
+
+    if not BACKUP_PASSWORD:
+        await message.reply("❌ BACKUP_PASSWORD is not set in .env")
+        return
 
     try:
         with pyzipper.AESZipFile(zip_path, "r") as zf:
