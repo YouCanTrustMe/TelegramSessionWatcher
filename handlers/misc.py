@@ -16,6 +16,12 @@ async def run_session_cmd(client: Client, message: Message):
 
 @bot.on_message(filters.command("log") & owner_filter)
 async def log_cmd(client: Client, message: Message):
+    args = message.text.split()
+    try:
+        n = int(args[1]) if len(args) > 1 else 50
+    except ValueError:
+        n = 50
+
     now = datetime.now()
     log_path = os.path.join(LOGS_DIR, str(now.year), f"{now.month:02d}", f"{now.strftime('%Y-%m-%d')}.log")
 
@@ -23,4 +29,13 @@ async def log_cmd(client: Client, message: Message):
         await message.reply("No log file found for today.")
         return
 
-    await message.reply_document(log_path, caption=f"📋 Log for `{now.strftime('%Y-%m-%d')}`")
+    with open(log_path, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    tail = "".join(lines[-n:]).strip()
+    if not tail:
+        await message.reply("Log file is empty.")
+        return
+
+    header = f"📋 `{now.strftime('%Y-%m-%d')}` — last {min(n, len(lines))} lines:\n\n"
+    await message.reply(header + f"```\n{tail}\n```")
