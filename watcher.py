@@ -124,8 +124,11 @@ async def run_session(hour: int = None):
         log.info(f"Starting session — {label}: {len(sessions)} accounts")
 
         any_unread = False
+        checked = []
         for i, (name, path) in enumerate(sessions):
+            check_time = datetime.now().strftime("%H:%M")
             has_unread = await check_account(name, path)
+            checked.append((name, check_time))
             if has_unread:
                 any_unread = True
             if i < len(sessions) - 1:
@@ -134,7 +137,9 @@ async def run_session(hour: int = None):
                 await asyncio.sleep(delay)
 
         if not any_unread:
-            now = datetime.now().strftime("%H:%M")
-            await send_notification(f"✅ Session completed at {now} — no new messages", silent=True)
+            start_time = checked[0][1] if checked else datetime.now().strftime("%H:%M")
+            lines = [f"✅ {start_time} — {len(checked)} checked, no new messages\n"]
+            lines += [f"{name} — {t}" for name, t in checked]
+            await send_notification("\n".join(lines), silent=True)
 
         log.info("Session completed")
