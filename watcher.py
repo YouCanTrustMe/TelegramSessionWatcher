@@ -10,6 +10,7 @@ from bot import send_notification
 from logger import get_logger
 
 log = get_logger(__name__)
+_session_lock = asyncio.Lock()
 
 def move_to_invalid(name: str, session_path: str):
     dest = os.path.join(INVALID_DIR, f"{name}_invalid")
@@ -76,23 +77,28 @@ async def check_account(name: str, session_path: str) -> bool:
     return has_unread
 
 async def run_session():
-    sessions = get_all_sessions()
-
-    if not sessions:
-        log.warning("No .session files found in sessions/")
+    if _session_lock.locked():
+        log.warning("run_session already in progress, skipping.")
         return
 
-    log.info(f"Starting session — accounts: {len(sessions)}")
+    async with _session_lock:
+        sessions = get_all_sessions()
 
-    any_unread = False
-    for name, path in sessions:
-        has_unread = await check_account(name, path)
-        if has_unread:
-            any_unread = True
-        await asyncio.sleep(random.uniform(2.0, 3.5))
+        if not sessions:
+            log.warning("No .session files found in sessions/")
+            return
 
-    if not any_unread:
-        now = datetime.now().strftime("%H:%M")
-        await send_notification(f"✅ Session completed at {now} — no new messages", silent=True)
+        log.info(f"Starting session — accounts: {len(sessions)}")
 
-    log.info("Session completed")
+        any_unread = False
+        for name, path in sessions:
+            has_unread = await check_account(name, path)
+            if has_unread:
+                any_unread = True
+            await asyncio.sleep(random.uniform(2.0, 3.5))
+
+        if not any_unread:
+            now = datetime.now().strftime("%H:%M")
+            await send_notification(f"✅ Session completed at {now} — no new messages", silent=True)
+
+        log.info("Session completed")
