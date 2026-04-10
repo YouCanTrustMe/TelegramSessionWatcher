@@ -2,6 +2,7 @@ import os
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery
+from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeExpired, PasswordHashInvalid
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID
 from logger import get_logger
@@ -23,7 +24,7 @@ def cleanup_pending(user_id: int):
             pass
     session_path = state.get("session_path")
     if session_path:
-        for ext in ["", ".session", ".session-journal"]:
+        for ext in [".session", ".session-journal"]:
             path = f"{session_path}{ext}"
             if os.path.exists(path):
                 os.remove(path)
@@ -92,16 +93,14 @@ async def handle_auth_input(client: Client, message: Message):
         try:
             await auth_client.sign_in(state["phone"], state["hash"], code)
             await finish_auth(message, auth_client, state)
+        except SessionPasswordNeeded:
+            pending_auth[OWNER_ID]["step"] = "2fa"
+            await message.reply("Enter 2FA password:", reply_markup=CANCEL_MARKUP)
+        except (PhoneCodeInvalid, PhoneCodeExpired):
+            await message.reply("❌ Invalid or expired code. Please enter the code again:", reply_markup=CANCEL_MARKUP)
         except Exception as e:
-            err = str(e).lower()
-            if "session_password_needed" in err or "password" in err or "2fa" in err:
-                pending_auth[OWNER_ID]["step"] = "2fa"
-                await message.reply("Enter 2FA password:", reply_markup=CANCEL_MARKUP)
-            elif "phone_code_invalid" in err or "phone_code_expired" in err:
-                await message.reply("❌ Invalid or expired code. Please enter the code again:", reply_markup=CANCEL_MARKUP)
-            else:
-                cleanup_pending(OWNER_ID)
-                await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
+            cleanup_pending(OWNER_ID)
+            await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
 
     elif state["step"] == "2fa":
         password = message.text.strip()
@@ -110,13 +109,11 @@ async def handle_auth_input(client: Client, message: Message):
         try:
             await auth_client.check_password(password)
             await finish_auth(message, auth_client, state)
+        except PasswordHashInvalid:
+            await message.reply("❌ Wrong password. Try again:", reply_markup=CANCEL_MARKUP)
         except Exception as e:
-            err = str(e).lower()
-            if "password_hash_invalid" in err:
-                await message.reply("❌ Wrong password. Try again:", reply_markup=CANCEL_MARKUP)
-            else:
-                cleanup_pending(OWNER_ID)
-                await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
+            cleanup_pending(OWNER_ID)
+            await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
 
 
 async def finish_auth(message: Message, auth_client: Client, state: dict):

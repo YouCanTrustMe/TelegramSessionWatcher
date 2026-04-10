@@ -8,7 +8,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, ARCHIVE_DIR
 from logger import get_logger
-from handlers.common import get_session_names, build_pagination
+from handlers.common import get_session_names, build_pagination, cb_encode, cb_decode
 
 log = get_logger(__name__)
 
@@ -45,7 +45,7 @@ async def ask_remove_confirm(message: Message, session_name: str):
         return
     markup = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Yes, archive", callback_data=f"confirm_remove:{session_name}"),
+            InlineKeyboardButton("✅ Yes, archive", callback_data=cb_encode("confirm_remove", session_name)),
             InlineKeyboardButton("❌ Cancel", callback_data="cancel_remove"),
         ]
     ])
@@ -57,7 +57,7 @@ async def ask_remove_confirm(message: Message, session_name: str):
 
 @bot.on_callback_query(filters.regex(r'^confirm_remove:'))
 async def handle_confirm_remove(client: Client, callback: CallbackQuery):
-    session_name = callback.data.split(":", 1)[1]
+    session_name = cb_decode(callback.data.split(":", 1)[1])
     session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
 
     if not os.path.exists(session_path):
@@ -171,7 +171,7 @@ async def unarchive_account_cmd(client: Client, message: Message):
 
 @bot.on_callback_query(filters.regex(r'^unarchive:'))
 async def handle_unarchive_callback(client: Client, callback: CallbackQuery):
-    session_name = callback.data.split(":", 1)[1]
+    session_name = cb_decode(callback.data.split(":", 1)[1])
     await callback.answer()
     await do_unarchive(callback.message, session_name)
 
@@ -206,6 +206,9 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
     elif action == "reauth":
         from handlers.invalid import get_invalid_names
         names = get_invalid_names()
+    elif action == "invalid":
+        from handlers.invalid import get_invalid_names
+        names = get_invalid_names(include_done=True)
     else:
         include_archived = action in ("info", "convert")
         names = get_session_names(include_archived=include_archived)
@@ -217,13 +220,13 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
 
 @bot.on_callback_query(filters.regex(r'^remove:'))
 async def handle_remove_callback(client: Client, callback: CallbackQuery):
-    session_name = callback.data.split(":", 1)[1]
+    session_name = cb_decode(callback.data.split(":", 1)[1])
     await ask_remove_confirm(callback.message, session_name)
     await callback.answer()
 
 
 @bot.on_callback_query(filters.regex(r'^info:'))
 async def handle_info_callback(client: Client, callback: CallbackQuery):
-    session_name = callback.data.split(":", 1)[1]
+    session_name = cb_decode(callback.data.split(":", 1)[1])
     await callback.answer()
     await do_info(callback.message, session_name)

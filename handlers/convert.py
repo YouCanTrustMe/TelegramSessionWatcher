@@ -5,7 +5,7 @@ from bot import bot, owner_filter
 from converter import convert_to_tdata
 from config import SESSIONS_DIR, ARCHIVE_DIR
 from logger import get_logger
-from handlers.common import get_session_names, build_pagination
+from handlers.common import get_session_names, build_pagination, cb_decode
 
 log = get_logger(__name__)
 
@@ -27,7 +27,7 @@ async def convert_account_cmd(client: Client, message: Message):
 
 @bot.on_callback_query(filters.regex(r'^convert:'))
 async def handle_convert_callback(client: Client, callback: CallbackQuery):
-    session_name = callback.data.split(":", 1)[1]
+    session_name = cb_decode(callback.data.split(":", 1)[1])
     await callback.message.edit_text(f"Converting `{session_name}`...")
     await callback.answer()
     await do_convert(callback.message, session_name, notify=False)

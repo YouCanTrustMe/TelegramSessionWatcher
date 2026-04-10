@@ -47,7 +47,13 @@ class DailyFileHandler(logging.Handler):
         super().close()
 
 
+_shared_file_handler = None
+_shared_console_handler = None
+
+
 def get_logger(name: str) -> logging.Logger:
+    global _shared_file_handler, _shared_console_handler
+
     logger = logging.getLogger(name)
 
     if logger.handlers:
@@ -55,18 +61,17 @@ def get_logger(name: str) -> logging.Logger:
 
     logger.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter(
-        "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
+    if _shared_file_handler is None:
+        formatter = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S"
+        )
+        _shared_file_handler = DailyFileHandler()
+        _shared_file_handler.setFormatter(formatter)
+        _shared_console_handler = logging.StreamHandler()
+        _shared_console_handler.setFormatter(formatter)
 
-    file_handler = DailyFileHandler()
-    file_handler.setFormatter(formatter)
-
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    logger.addHandler(_shared_file_handler)
+    logger.addHandler(_shared_console_handler)
 
     return logger

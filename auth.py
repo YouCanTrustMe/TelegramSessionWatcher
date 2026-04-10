@@ -53,7 +53,8 @@ async def add_account():
     await client.disconnect()
 
     old_path = f"{session_path}.session"
-    new_name = f"{phone}_{full_name}" if full_name else phone
+    phone_clean = phone.lstrip("+")
+    new_name = f"{phone_clean}_{full_name}" if full_name else phone_clean
     new_path = os.path.join(SESSIONS_DIR, f"{new_name}.session")
     os.rename(old_path, new_path)
 

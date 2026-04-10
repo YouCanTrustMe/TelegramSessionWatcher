@@ -46,7 +46,7 @@ def _random_delay() -> float:
         return random.uniform(15.0, 30.0)
     return random.uniform(3.0, 8.0)
 
-async def check_account(name: str, session_path: str) -> bool:
+async def check_account(name: str, session_path: str, _retry: bool = True) -> bool:
     client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
     has_unread = False
 
@@ -95,6 +95,9 @@ async def check_account(name: str, session_path: str) -> bool:
     except FloodWait as e:
         log.warning(f"[{name}] FloodWait: waiting {e.value}s")
         await asyncio.sleep(e.value)
+        if _retry:
+            log.info(f"[{name}] Retrying after FloodWait")
+            return await check_account(name, session_path, _retry=False)
     except Exception as e:
         log.error(f"[{name}] Unknown error: {e}")
         await send_notification(f"⚠️ [{name}] Unknown error: {e}")

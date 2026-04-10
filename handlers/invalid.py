@@ -5,7 +5,7 @@ from pyrogram.types import Message, CallbackQuery
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, OWNER_ID
 from logger import get_logger
-from handlers.common import build_pagination, pending_auth, CANCEL_MARKUP
+from handlers.common import build_pagination, pending_auth, CANCEL_MARKUP, cb_decode
 
 log = get_logger(__name__)
 
@@ -26,7 +26,7 @@ async def invalid_cmd(client: Client, message: Message):
     if not names:
         await message.reply("No invalid sessions found.")
         return
-    text, markup = build_pagination(names, 0, "list")
+    text, markup = build_pagination(names, 0, "invalid")
     await message.reply(text, reply_markup=markup)
 
 
@@ -47,7 +47,7 @@ async def reauth_cmd(client: Client, message: Message):
 
 @bot.on_callback_query(filters.regex(r'^reauth:'))
 async def handle_reauth_callback(client: Client, callback: CallbackQuery):
-    session_name = callback.data.split(":", 1)[1]
+    session_name = cb_decode(callback.data.split(":", 1)[1])
     await callback.answer()
     await start_reauth(callback.message, session_name)
 

@@ -114,6 +114,9 @@ async def restore_cmd(client: Client, message: Message):
     try:
         with pyzipper.AESZipFile(zip_path, "r") as zf:
             zf.setpassword(BACKUP_PASSWORD.encode())
+            for info in zf.infolist():
+                if ".." in info.filename or info.filename.startswith("/"):
+                    raise ValueError(f"Unsafe path in archive: {info.filename}")
             zf.extractall(tmp_dir)
 
         # snapshot existing items for rollback
