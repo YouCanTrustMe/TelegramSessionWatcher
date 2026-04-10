@@ -8,9 +8,31 @@ from config import LOGS_DIR
 
 @bot.on_message(filters.command("run") & owner_filter)
 async def run_session_cmd(client: Client, message: Message):
-    from watcher import run_session
-    await message.reply("Starting session manually...")
-    await run_session()
+    from watcher import run_session, _session_lock
+    from config import SCHEDULE_HOURS
+
+    if _session_lock.locked():
+        await message.reply("⏳ Session check already in progress.")
+        return
+
+    parts = message.text.split()
+    if len(parts) < 2:
+        hours_str = ", ".join(str(h) for h in SCHEDULE_HOURS)
+        await message.reply(f"Usage: `/run <hour>`\nAvailable hours: {hours_str}")
+        return
+
+    try:
+        hour = int(parts[1].strip())
+    except ValueError:
+        await message.reply("❌ Invalid hour. Example: `/run 8`")
+        return
+
+    if hour not in SCHEDULE_HOURS:
+        await message.reply(f"❌ Hour `{hour}` not in schedule: {SCHEDULE_HOURS}")
+        return
+
+    await message.reply(f"Starting session for hour {hour}...")
+    await run_session(hour=hour)
     await message.reply("✅ Session completed.")
 
 

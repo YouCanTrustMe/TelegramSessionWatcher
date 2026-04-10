@@ -6,7 +6,7 @@ from datetime import datetime
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
 from pyrogram.raw.functions.account import UpdateStatus
-from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR
+from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS
 from bot import send_notification
 from logger import get_logger
 
@@ -30,6 +30,21 @@ def get_all_sessions() -> list:
             path = os.path.join(SESSIONS_DIR, name)
             sessions.append((name, path))
     return sessions
+
+
+def get_batch_for_hour(hour: int) -> list:
+    all_sessions = get_all_sessions()
+    if hour not in SCHEDULE_HOURS or not SCHEDULE_HOURS:
+        return all_sessions
+    idx = SCHEDULE_HOURS.index(hour)
+    return [(name, path) for name, path in all_sessions
+            if sum(ord(c) for c in name) % len(SCHEDULE_HOURS) == idx]
+
+
+def _random_delay() -> float:
+    if random.random() < 0.2:
+        return random.uniform(15.0, 30.0)
+    return random.uniform(3.0, 8.0)
 
 async def check_account(name: str, session_path: str) -> bool:
     client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
@@ -93,26 +108,30 @@ async def check_account(name: str, session_path: str) -> bool:
 
     return has_unread
 
-async def run_session():
+async def run_session(hour: int = None):
     if _session_lock.locked():
         log.warning("run_session already in progress, skipping.")
         return
 
     async with _session_lock:
-        sessions = get_all_sessions()
+        sessions = get_batch_for_hour(hour) if hour is not None else get_all_sessions()
 
         if not sessions:
-            log.warning("No .session files found in sessions/")
+            log.warning("No sessions found for this batch.")
             return
 
-        log.info(f"Starting session — accounts: {len(sessions)}")
+        label = f"hour {hour}" if hour is not None else "all accounts"
+        log.info(f"Starting session — {label}: {len(sessions)} accounts")
 
         any_unread = False
-        for name, path in sessions:
+        for i, (name, path) in enumerate(sessions):
             has_unread = await check_account(name, path)
             if has_unread:
                 any_unread = True
-            await asyncio.sleep(random.uniform(2.0, 3.5))
+            if i < len(sessions) - 1:
+                delay = _random_delay()
+                log.debug(f"Waiting {delay:.1f}s before next account")
+                await asyncio.sleep(delay)
 
         if not any_unread:
             now = datetime.now().strftime("%H:%M")

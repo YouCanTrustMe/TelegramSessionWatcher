@@ -96,13 +96,20 @@ async def convert_to_tdata(session_name: str, source_dir: str = None) -> Optiona
     os.makedirs(output_path, exist_ok=True)
 
     client = TelegramClient(telethon_path, API_ID, API_HASH)
-    await client.connect()
 
     try:
+        await client.connect()
         tdesk = await TDesktop.FromTelethon(client, flag=UseCurrentSession)
         tdesk.SaveTData(output_path)
+    except Exception:
+        if os.path.isdir(output_path):
+            shutil.rmtree(output_path)
+        raise
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
         if os.path.exists(f"{telethon_path}.session"):
             os.remove(f"{telethon_path}.session")
 

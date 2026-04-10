@@ -15,7 +15,7 @@ OWNER_ID = int(os.getenv("OWNER_ID"))
 BACKUP_PASSWORD = os.getenv("BACKUP_PASSWORD")
 BACKUP_DAY = int(os.getenv("BACKUP_DAY", "0"))
 BACKUP_HOUR = int(os.getenv("BACKUP_HOUR", "9"))
-SCHEDULE_HOURS = [int(h) for h in os.getenv("SCHEDULE_HOURS", "7,19").split(",")]
+SCHEDULE_HOURS = [int(h) for h in os.getenv("SCHEDULE_HOURS", "7,10,13,16,20,23,1,3,5,6").split(",")]
 
 DATA_DIR = "data"
 SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")

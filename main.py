@@ -69,7 +69,7 @@ async def scheduler():
                 _write_state(last_session_run, last_backup_run)
                 log.info(f"Running session at {now.strftime('%H:%M')}")
                 try:
-                    await run_session()
+                    await run_session(hour=now.hour)
                 except Exception as e:
                     log.error(f"run_session failed: {e}")
 

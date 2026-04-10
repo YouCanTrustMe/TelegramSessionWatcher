@@ -113,27 +113,27 @@ async def do_info(message: Message, session_name: str):
     session_no_ext = os.path.join(base_dir, clean_name)
     client = Client(session_no_ext, api_id=API_ID, api_hash=API_HASH)
 
+    full_name = username = phone = "—"
+    account_status = "⚠️ unknown"
+
     try:
         await client.connect()
         me = await client.get_me()
-
         first = me.first_name or ""
         last = me.last_name or ""
         full_name = f"{first} {last}".strip() or "—"
         username = f"@{me.username}" if me.username else "—"
         phone = f"+{me.phone_number}" if me.phone_number else "—"
         account_status = "🟢 active"
-
-        await client.disconnect()
     except (AuthKeyUnregistered, UserDeactivated) as e:
-        if isinstance(e, AuthKeyUnregistered):
-            account_status = "🔴 invalid session"
-        else:
-            account_status = "🔴 deactivated"
-        full_name = username = phone = "—"
+        account_status = "🔴 invalid session" if isinstance(e, AuthKeyUnregistered) else "🔴 deactivated"
     except Exception as e:
         account_status = f"⚠️ error: {e}"
-        full_name = username = phone = "—"
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
 
     await message.reply(
         f"**Account info:**\n"

@@ -116,15 +116,43 @@ async def restore_cmd(client: Client, message: Message):
             zf.setpassword(BACKUP_PASSWORD.encode())
             zf.extractall(tmp_dir)
 
+        # snapshot existing items for rollback
+        rollback = {}
         for item in os.listdir(tmp_dir):
-            src = os.path.join(tmp_dir, item)
             dst = item
-            if os.path.isdir(src):
-                if os.path.exists(dst):
-                    shutil.rmtree(dst)
-                shutil.copytree(src, dst)
-            else:
-                shutil.copy2(src, dst)
+            if os.path.exists(dst):
+                backup_copy = f"{dst}_rollback"
+                if os.path.isdir(dst):
+                    shutil.copytree(dst, backup_copy)
+                else:
+                    shutil.copy2(dst, backup_copy)
+                rollback[dst] = backup_copy
+
+        try:
+            for item in os.listdir(tmp_dir):
+                src = os.path.join(tmp_dir, item)
+                dst = item
+                if os.path.isdir(src):
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
+                else:
+                    shutil.copy2(src, dst)
+        except Exception as e:
+            for dst, backup_copy in rollback.items():
+                if os.path.isdir(backup_copy):
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(backup_copy, dst)
+                else:
+                    shutil.copy2(backup_copy, dst)
+            raise
+
+        for backup_copy in rollback.values():
+            if os.path.isdir(backup_copy):
+                shutil.rmtree(backup_copy)
+            elif os.path.exists(backup_copy):
+                os.remove(backup_copy)
 
         await message.reply("✅ Backup restored.")
         log.info("Backup restored")
@@ -132,6 +160,7 @@ async def restore_cmd(client: Client, message: Message):
         await message.reply(f"❌ Restore failed: {e}")
         log.error(f"Restore failed: {e}")
     finally:
-        os.remove(zip_path)
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
         if os.path.exists(tmp_dir):
             shutil.rmtree(tmp_dir)
