@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import signal
 from datetime import datetime
@@ -40,6 +41,7 @@ async def exit_cmd(client, message: Message):
 
 
 _STATE_FILE = os.path.join(DATA_DIR, "scheduler_state.txt")
+BATCH_STATE_FILE = os.path.join(DATA_DIR, "batch_state.json")
 
 
 def _read_state() -> tuple:
@@ -49,6 +51,17 @@ def _read_state() -> tuple:
             return parts[0] if len(parts) > 0 else None, parts[1] if len(parts) > 1 else None
     except FileNotFoundError:
         return None, None
+
+
+def _update_batch_state(hour: int):
+    try:
+        with open(BATCH_STATE_FILE) as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {}
+    state[str(hour)] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open(BATCH_STATE_FILE, "w") as f:
+        json.dump(state, f)
 
 
 def _write_state(session_key: Optional[str], backup_key: Optional[str]):
@@ -70,6 +83,7 @@ async def scheduler():
                 log.info(f"Running session at {now.strftime('%H:%M')}")
                 try:
                     await run_session(hour=now.hour)
+                    _update_batch_state(now.hour)
                 except Exception as e:
                     log.error(f"run_session failed: {e}")
 

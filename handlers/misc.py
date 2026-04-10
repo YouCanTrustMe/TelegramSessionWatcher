@@ -1,9 +1,81 @@
+import json
 import os
 from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import bot, owner_filter
-from config import LOGS_DIR
+from config import LOGS_DIR, DATA_DIR, SCHEDULE_HOURS
+
+
+def _load_batch_state() -> dict:
+    try:
+        with open(os.path.join(DATA_DIR, "batch_state.json")) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _load_scheduler_state() -> tuple:
+    try:
+        with open(os.path.join(DATA_DIR, "scheduler_state.txt")) as f:
+            parts = f.read().strip().split("\n")
+            return (
+                parts[0] if len(parts) > 0 else "",
+                parts[1] if len(parts) > 1 else "",
+            )
+    except FileNotFoundError:
+        return ("", "")
+
+
+@bot.on_message(filters.command("status") & owner_filter)
+async def status_cmd(client: Client, message: Message):
+    from watcher import get_batch_for_hour, _session_lock
+
+    batch_state = _load_batch_state()
+    scheduler_state = _load_scheduler_state()
+    now = datetime.now()
+    running = _session_lock.locked()
+
+    lines = [f"**📊 Status** {'⏳ running' if running else ''}\n"]
+    for hour in SCHEDULE_HOURS:
+        batch = get_batch_for_hour(hour)
+        last = batch_state.get(str(hour), "—")
+        marker = "▶️" if hour == now.hour else "•"
+        lines.append(f"{marker} `{hour:02d}:00` — {len(batch)} acc — {last}")
+
+    sorted_hours = sorted(SCHEDULE_HOURS)
+    future = [h for h in sorted_hours if h > now.hour]
+    next_hour = future[0] if future else sorted_hours[0]
+    lines.append(f"\n**Next:** `{next_hour:02d}:00`")
+
+    last_backup = scheduler_state[1]
+    if last_backup:
+        lines.append(f"**Last backup:** `{last_backup}`")
+
+    buttons = [
+        InlineKeyboardButton(f"👁 {hour:02d}:00", callback_data=f"status_batch:{hour}")
+        for hour in SCHEDULE_HOURS
+    ]
+    rows = [buttons[i:i+5] for i in range(0, len(buttons), 5)]
+    markup = InlineKeyboardMarkup(rows)
+
+    await message.reply("\n".join(lines), reply_markup=markup)
+
+
+@bot.on_callback_query(filters.regex(r'^status_batch:') & owner_filter)
+async def status_batch_callback(client: Client, callback: CallbackQuery):
+    from watcher import get_batch_for_hour
+
+    hour = int(callback.data.split(":")[1])
+    batch = get_batch_for_hour(hour)
+    await callback.answer()
+
+    if not batch:
+        await callback.message.reply(f"**{hour:02d}:00** — no accounts in this batch.")
+        return
+
+    names = "\n".join(f"• `{name}`" for name, _ in batch)
+    await callback.message.reply(f"**{hour:02d}:00 — {len(batch)} accounts:**\n{names}")
 
 
 @bot.on_message(filters.command("run") & owner_filter)
