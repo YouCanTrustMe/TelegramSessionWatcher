@@ -30,16 +30,24 @@ async def handle_convert_callback(client: Client, callback: CallbackQuery):
     session_name = callback.data.split(":", 1)[1]
     await callback.message.edit_text(f"Converting `{session_name}`...")
     await callback.answer()
-    await do_convert(callback.message, session_name)
+    await do_convert(callback.message, session_name, notify=False)
 
 
-async def do_convert(message: Message, session_name: str):
+async def do_convert(message: Message, session_name: str, notify: bool = True):
     clean_name = session_name.removeprefix("[archived] ")
     is_archived = session_name.startswith("[archived] ")
     source_dir = ARCHIVE_DIR if is_archived else SESSIONS_DIR
 
-    await message.reply(f"Converting `{clean_name}`...")
-    zip_path = await convert_to_tdata(clean_name, source_dir=source_dir)
+    if notify:
+        await message.reply(f"Converting `{clean_name}`...")
+
+    try:
+        zip_path = await convert_to_tdata(clean_name, source_dir=source_dir)
+    except Exception as e:
+        log.error(f"Conversion failed for {clean_name}: {e}")
+        await message.reply(f"❌ Failed to convert `{clean_name}`: {e}")
+        return
+
     if zip_path is None:
         await message.reply(f"Session `{clean_name}` not found.")
         return

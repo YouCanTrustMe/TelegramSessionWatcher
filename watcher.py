@@ -1,14 +1,24 @@
 import asyncio
 import os
+import shutil
 import random
 from datetime import datetime
 from pyrogram import Client
-from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait
-from config import API_ID, API_HASH, SESSIONS_DIR
+from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
+from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR
 from bot import send_notification
 from logger import get_logger
 
 log = get_logger(__name__)
+
+def move_to_invalid(name: str, session_path: str):
+    dest = os.path.join(INVALID_DIR, f"{name}_invalid")
+    for ext in (".session", ".session-journal"):
+        src = f"{session_path}{ext}"
+        if os.path.exists(src):
+            shutil.move(src, f"{dest}{ext}")
+    log.info(f"[{name}] Moved to invalid/")
+
 
 def get_all_sessions() -> list:
     sessions = []
@@ -45,12 +55,14 @@ async def check_account(name: str, session_path: str) -> bool:
                 await send_notification(f"📩 Account [{name}]\nNew message from: {chat_name}")
                 has_unread = True
 
-    except AuthKeyUnregistered:
+    except (AuthKeyUnregistered, SessionRevoked):
         log.error(f"[{name}] Session invalid")
-        await send_notification(f"🚫 [{name}] Session invalid — re-authorization required")
+        move_to_invalid(name, session_path)
+        await send_notification(f"🚫 [{name}] Session invalid — moved to invalid. Use /reauth to re-login.")
     except UserDeactivated:
         log.error(f"[{name}] Account deactivated")
-        await send_notification(f"❌ [{name}] Account deactivated by Telegram")
+        move_to_invalid(name, session_path)
+        await send_notification(f"❌ [{name}] Account deactivated by Telegram — moved to invalid.")
     except FloodWait as e:
         log.warning(f"[{name}] FloodWait: waiting {e.value}s")
         await asyncio.sleep(e.value)

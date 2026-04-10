@@ -135,6 +135,14 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
     new_path = os.path.join(SESSIONS_DIR, f"{new_name}.session")
     os.rename(old_path, new_path)
 
+    reauth_source = state.get("reauth_source")
+    if reauth_source:
+        for ext in (".session", ".session-journal"):
+            src = f"{reauth_source}{ext}"
+            if os.path.exists(src):
+                os.rename(src, f"{reauth_source}_done{ext}")
+        log.info(f"Reauth complete, marked as done: {reauth_source}")
+
     del pending_auth[OWNER_ID]
     log.info(f"Account added via bot: {new_name}")
     await message.reply(f"✅ Account added: `{new_name}`\n⏳ Backup in 3 minutes...")

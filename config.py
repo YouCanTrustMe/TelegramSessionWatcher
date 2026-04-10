@@ -16,9 +16,10 @@ SCHEDULE_HOURS = [int(h) for h in os.getenv("SCHEDULE_HOURS", "7,19").split(",")
 DATA_DIR = "data"
 SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
 ARCHIVE_DIR = os.path.join(DATA_DIR, "archive")
+INVALID_DIR = os.path.join(DATA_DIR, "invalid")
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
 TDATA_DIR = os.path.join(DATA_DIR, "tdata")
 TEMP_DIR = os.path.join(DATA_DIR, "temp")
 
-for _d in (SESSIONS_DIR, ARCHIVE_DIR, LOGS_DIR, TDATA_DIR, TEMP_DIR):
+for _d in (SESSIONS_DIR, ARCHIVE_DIR, INVALID_DIR, LOGS_DIR, TDATA_DIR, TEMP_DIR):
     os.makedirs(_d, exist_ok=True)
