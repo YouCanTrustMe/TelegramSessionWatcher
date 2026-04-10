@@ -3,6 +3,10 @@ import os
 
 load_dotenv()
 
+_missing = [k for k in ("API_ID", "API_HASH", "BOT_TOKEN", "OWNER_ID") if not os.getenv(k)]
+if _missing:
+    raise EnvironmentError(f"Missing required .env variables: {', '.join(_missing)}")
+
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")

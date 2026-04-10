@@ -68,9 +68,9 @@ async def handle_auth_input(client: Client, message: Message):
         phone = message.text.strip()
         session_path = os.path.join(SESSIONS_DIR, phone)
         auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
-        await auth_client.connect()
 
         try:
+            await auth_client.connect()
             sent = await auth_client.send_code(phone)
             pending_auth[OWNER_ID] = {
                 "step": "code",
@@ -131,7 +131,8 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
 
     old_path = f"{state['session_path']}.session"
     phone = state["phone"]
-    new_name = f"{phone}_{full_name}" if full_name else phone
+    phone_clean = phone.lstrip("+")
+    new_name = f"{phone_clean}_{full_name}" if full_name else phone_clean
     new_path = os.path.join(SESSIONS_DIR, f"{new_name}.session")
     os.rename(old_path, new_path)
 

@@ -64,9 +64,12 @@ async def do_backup() -> None:
     lines.append(f"\n> 🗂 Total: **{total_files}** file(s)")
     caption = "\n".join(lines)
 
-    await bot.send_document(OWNER_ID, zip_path, caption=caption)
-    os.remove(zip_path)
-    log.info("Backup created and sent")
+    try:
+        await bot.send_document(OWNER_ID, zip_path, caption=caption)
+        log.info("Backup created and sent")
+    finally:
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
 
 
 async def schedule_backup_after_add() -> None:
@@ -78,7 +81,10 @@ async def schedule_backup_after_add() -> None:
 @bot.on_message(filters.command("backup") & owner_filter)
 async def backup_cmd(client: Client, message: Message):
     await message.reply("Creating backup...")
-    await do_backup()
+    try:
+        await do_backup()
+    except Exception as e:
+        await message.reply(f"❌ Backup failed: {e}")
 
 
 @bot.on_message(filters.command("restore") & owner_filter)
@@ -90,7 +96,11 @@ async def restore_cmd(client: Client, message: Message):
     await message.reply("Restoring backup...")
 
     zip_path = os.path.join(tempfile.gettempdir(), "tsw_restore.zip")
-    await message.reply_to_message.download(zip_path)
+    try:
+        await message.reply_to_message.download(zip_path)
+    except Exception as e:
+        await message.reply(f"❌ Failed to download file: {e}")
+        return
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "tsw_restore_tmp")
     if os.path.exists(tmp_dir):

@@ -98,12 +98,13 @@ async def convert_to_tdata(session_name: str, source_dir: str = None) -> Optiona
     client = TelegramClient(telethon_path, API_ID, API_HASH)
     await client.connect()
 
-    tdesk = await TDesktop.FromTelethon(client, flag=UseCurrentSession)
-    tdesk.SaveTData(output_path)
-
-    await client.disconnect()
-
-    os.remove(f"{telethon_path}.session")
+    try:
+        tdesk = await TDesktop.FromTelethon(client, flag=UseCurrentSession)
+        tdesk.SaveTData(output_path)
+    finally:
+        await client.disconnect()
+        if os.path.exists(f"{telethon_path}.session"):
+            os.remove(f"{telethon_path}.session")
 
     zip_path = f"{output_path}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:

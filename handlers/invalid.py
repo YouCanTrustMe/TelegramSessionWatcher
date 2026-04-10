@@ -67,9 +67,9 @@ async def start_reauth(message: Message, session_name: str):
 
     session_path = os.path.join(SESSIONS_DIR, phone)
     auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
-    await auth_client.connect()
 
     try:
+        await auth_client.connect()
         sent = await auth_client.send_code(phone)
         pending_auth[OWNER_ID] = {
             "step": "code",

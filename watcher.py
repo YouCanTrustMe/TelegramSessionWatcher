@@ -49,7 +49,14 @@ async def check_account(name: str, session_path: str) -> bool:
 
         await client.invoke(UpdateStatus(offline=False))
 
-        async for dialog in client.get_dialogs():
+        async def _collect_dialogs():
+            result = []
+            async for dialog in client.get_dialogs():
+                result.append(dialog)
+            return result
+
+        dialogs = await asyncio.wait_for(_collect_dialogs(), timeout=60)
+        for dialog in dialogs:
             if (
                 dialog.unread_messages_count > 0
                 and dialog.chat.type.value not in ("channel", "supergroup", "group", "bot")
@@ -59,6 +66,9 @@ async def check_account(name: str, session_path: str) -> bool:
                 await send_notification(f"📩 Account [{name}]\nNew message from: {chat_name}")
                 has_unread = True
 
+    except asyncio.TimeoutError:
+        log.error(f"[{name}] get_dialogs timed out after 60s")
+        await send_notification(f"⚠️ [{name}] Check timed out — Telegram not responding")
     except (AuthKeyUnregistered, SessionRevoked):
         log.error(f"[{name}] Session invalid")
         move_to_invalid(name, session_path)
