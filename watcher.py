@@ -5,6 +5,7 @@ import random
 from datetime import datetime
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
+from pyrogram.raw.functions.account import UpdateStatus
 from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR
 from bot import send_notification
 from logger import get_logger
@@ -46,6 +47,8 @@ async def check_account(name: str, session_path: str) -> bool:
         me = await client.get_me()
         log.info(f"[{name}] Account alive: {me.first_name}")
 
+        await client.invoke(UpdateStatus(offline=False))
+
         async for dialog in client.get_dialogs():
             if (
                 dialog.unread_messages_count > 0
@@ -71,6 +74,10 @@ async def check_account(name: str, session_path: str) -> bool:
         log.error(f"[{name}] Unknown error: {e}")
         await send_notification(f"⚠️ [{name}] Unknown error: {e}")
     finally:
+        try:
+            await client.invoke(UpdateStatus(offline=True))
+        except Exception:
+            pass
         await client.disconnect()
         log.info(f"[{name}] Disconnected")
 

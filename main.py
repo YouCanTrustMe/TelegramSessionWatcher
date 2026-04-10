@@ -1,4 +1,5 @@
 import asyncio
+import os
 import signal
 from datetime import datetime
 from typing import Optional
@@ -7,7 +8,7 @@ from pyrogram.types import Message
 from watcher import run_session
 from bot import bot, owner_filter
 from logger import get_logger
-from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR
+from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR, DATA_DIR
 import handlers
 
 log = get_logger(__name__)
@@ -38,9 +39,25 @@ async def exit_cmd(client, message: Message):
     _shutdown = True
 
 
+_STATE_FILE = os.path.join(DATA_DIR, "scheduler_state.txt")
+
+
+def _read_state() -> tuple:
+    try:
+        with open(_STATE_FILE) as f:
+            parts = f.read().strip().split("\n")
+            return parts[0] if len(parts) > 0 else None, parts[1] if len(parts) > 1 else None
+    except FileNotFoundError:
+        return None, None
+
+
+def _write_state(session_key: Optional[str], backup_key: Optional[str]):
+    with open(_STATE_FILE, "w") as f:
+        f.write(f"{session_key or ''}\n{backup_key or ''}")
+
+
 async def scheduler():
-    last_session_run: Optional[str] = None
-    last_backup_run: Optional[str] = None
+    last_session_run, last_backup_run = _read_state()
 
     while not _shutdown:
         now = datetime.now()
@@ -49,6 +66,7 @@ async def scheduler():
             key = now.strftime("%Y-%m-%d %H")
             if key != last_session_run:
                 last_session_run = key
+                _write_state(last_session_run, last_backup_run)
                 log.info(f"Running session at {now.strftime('%H:%M')}")
                 try:
                     await run_session()
@@ -59,6 +77,7 @@ async def scheduler():
             key = now.strftime("%Y-%m-%d %H")
             if key != last_backup_run:
                 last_backup_run = key
+                _write_state(last_session_run, last_backup_run)
                 log.info("Running scheduled backup")
                 try:
                     await handlers.do_backup()
