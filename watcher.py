@@ -49,6 +49,7 @@ def _random_delay() -> float:
 async def check_account(name: str, session_path: str, _retry: bool = True) -> bool:
     client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
     has_unread = False
+    disconnected = False
 
     try:
         await client.connect()
@@ -96,6 +97,7 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
         log.warning(f"[{name}] FloodWait: waiting {e.value}s")
         await asyncio.sleep(e.value)
         await client.disconnect()
+        disconnected = True
         if _retry:
             log.info(f"[{name}] Retrying after FloodWait")
             return await check_account(name, session_path, _retry=False)
@@ -103,11 +105,12 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
         log.error(f"[{name}] Unknown error: {e}")
         await send_notification(f"⚠️ [{name}] Unknown error: {e}")
     finally:
-        try:
-            await client.invoke(UpdateStatus(offline=True))
-        except Exception:
-            pass
-        await client.disconnect()
+        if not disconnected:
+            try:
+                await client.invoke(UpdateStatus(offline=True))
+            except Exception:
+                pass
+            await client.disconnect()
         log.info(f"[{name}] Disconnected")
 
     return has_unread

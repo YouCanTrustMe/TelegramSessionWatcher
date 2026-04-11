@@ -82,10 +82,10 @@ async def scheduler():
                 try:
                     await run_session(hour=now.hour)
                     _update_batch_state(now.hour)
-                    last_session_run = key
-                    _write_state(last_session_run, last_backup_run)
                 except Exception as e:
                     log.error(f"run_session failed: {e}")
+                last_session_run = key
+                _write_state(last_session_run, last_backup_run)
 
         if now.weekday() == BACKUP_DAY and now.hour == BACKUP_HOUR:
             key = now.strftime("%Y-%m-%d %H")
@@ -93,10 +93,10 @@ async def scheduler():
                 log.info("Running scheduled backup")
                 try:
                     await handlers.do_backup()
-                    last_backup_run = key
-                    _write_state(last_session_run, last_backup_run)
                 except Exception as e:
                     log.error(f"do_backup failed: {e}")
+                last_backup_run = key
+                _write_state(last_session_run, last_backup_run)
 
         for _ in range(30):
             if _shutdown:

@@ -109,6 +109,8 @@ async def restore_cmd(client: Client, message: Message):
 
     if not BACKUP_PASSWORD:
         await message.reply("❌ BACKUP_PASSWORD is not set in .env")
+        if os.path.exists(zip_path):
+            os.remove(zip_path)
         return
 
     try:
