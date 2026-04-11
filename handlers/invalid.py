@@ -48,6 +48,9 @@ async def reauth_cmd(client: Client, message: Message):
 @bot.on_callback_query(filters.regex(r'^reauth:'))
 async def handle_reauth_callback(client: Client, callback: CallbackQuery):
     session_name = cb_decode(callback.data.split(":", 1)[1])
+    if session_name is None:
+        await callback.answer("⚠️ Outdated button. Use /reauth again.", show_alert=True)
+        return
     await callback.answer()
     await start_reauth(callback.message, session_name)
 
@@ -63,26 +66,30 @@ async def start_reauth(message: Message, session_name: str):
 
     if OWNER_ID in pending_auth:
         from handlers.auth import cleanup_pending
-        cleanup_pending(OWNER_ID)
+        await cleanup_pending(OWNER_ID)
 
     session_path = os.path.join(SESSIONS_DIR, phone)
     auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
+    pending_auth[OWNER_ID] = {
+        "step": "phone",
+        "client": auth_client,
+        "session_path": session_path,
+        "reauth_source": invalid_path,
+    }
 
     try:
         await auth_client.connect()
         sent = await auth_client.send_code(phone)
-        pending_auth[OWNER_ID] = {
+        pending_auth[OWNER_ID].update({
             "step": "code",
             "phone": phone,
             "hash": sent.phone_code_hash,
-            "client": auth_client,
-            "session_path": session_path,
-            "reauth_source": invalid_path,
-        }
+        })
         await message.reply(
             f"Re-auth for `{session_name}`\nCode sent to `{phone}`. Enter the code:",
             reply_markup=CANCEL_MARKUP
         )
     except Exception as e:
-        await auth_client.disconnect()
+        from handlers.auth import cleanup_pending
+        await cleanup_pending(OWNER_ID)
         await message.reply(f"❌ Error sending code: {e}")

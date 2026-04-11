@@ -90,7 +90,12 @@ async def convert_to_tdata(session_name: str, source_dir: str = None) -> Optiona
     if os.path.exists(f"{telethon_path}.session"):
         os.remove(f"{telethon_path}.session")
 
-    pyrogram_to_telethon(session_path, telethon_path)
+    try:
+        pyrogram_to_telethon(session_path, telethon_path)
+    except Exception:
+        if os.path.exists(f"{telethon_path}.session"):
+            os.remove(f"{telethon_path}.session")
+        raise
 
     output_path = os.path.join(TDATA_DIR, session_name)
     os.makedirs(output_path, exist_ok=True)

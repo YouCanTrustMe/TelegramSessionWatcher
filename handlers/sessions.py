@@ -58,6 +58,9 @@ async def ask_remove_confirm(message: Message, session_name: str):
 @bot.on_callback_query(filters.regex(r'^confirm_remove:'))
 async def handle_confirm_remove(client: Client, callback: CallbackQuery):
     session_name = cb_decode(callback.data.split(":", 1)[1])
+    if session_name is None:
+        await callback.answer("⚠️ Outdated button. Use /archive again.", show_alert=True)
+        return
     session_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
 
     if not os.path.exists(session_path):
@@ -172,6 +175,9 @@ async def unarchive_account_cmd(client: Client, message: Message):
 @bot.on_callback_query(filters.regex(r'^unarchive:'))
 async def handle_unarchive_callback(client: Client, callback: CallbackQuery):
     session_name = cb_decode(callback.data.split(":", 1)[1])
+    if session_name is None:
+        await callback.answer("⚠️ Outdated button. Use /unarchive again.", show_alert=True)
+        return
     await callback.answer()
     await do_unarchive(callback.message, session_name)
 
@@ -221,6 +227,9 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
 @bot.on_callback_query(filters.regex(r'^remove:'))
 async def handle_remove_callback(client: Client, callback: CallbackQuery):
     session_name = cb_decode(callback.data.split(":", 1)[1])
+    if session_name is None:
+        await callback.answer("⚠️ Outdated button. Use /archive again.", show_alert=True)
+        return
     await ask_remove_confirm(callback.message, session_name)
     await callback.answer()
 
@@ -228,5 +237,8 @@ async def handle_remove_callback(client: Client, callback: CallbackQuery):
 @bot.on_callback_query(filters.regex(r'^info:'))
 async def handle_info_callback(client: Client, callback: CallbackQuery):
     session_name = cb_decode(callback.data.split(":", 1)[1])
+    if session_name is None:
+        await callback.answer("⚠️ Outdated button. Use /info again.", show_alert=True)
+        return
     await callback.answer()
     await do_info(callback.message, session_name)

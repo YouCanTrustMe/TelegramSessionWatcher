@@ -28,6 +28,9 @@ async def convert_account_cmd(client: Client, message: Message):
 @bot.on_callback_query(filters.regex(r'^convert:'))
 async def handle_convert_callback(client: Client, callback: CallbackQuery):
     session_name = cb_decode(callback.data.split(":", 1)[1])
+    if session_name is None:
+        await callback.answer("⚠️ Outdated button. Use /convert again.", show_alert=True)
+        return
     await callback.message.edit_text(f"Converting `{session_name}`...")
     await callback.answer()
     await do_convert(callback.message, session_name, notify=False)

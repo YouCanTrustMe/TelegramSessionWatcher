@@ -95,6 +95,7 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
     except FloodWait as e:
         log.warning(f"[{name}] FloodWait: waiting {e.value}s")
         await asyncio.sleep(e.value)
+        await client.disconnect()
         if _retry:
             log.info(f"[{name}] Retrying after FloodWait")
             return await check_account(name, session_path, _retry=False)

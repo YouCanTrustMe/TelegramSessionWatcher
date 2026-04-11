@@ -12,14 +12,14 @@ from handlers.common import pending_auth, CANCEL_MARKUP
 log = get_logger(__name__)
 
 
-def cleanup_pending(user_id: int):
+async def cleanup_pending(user_id: int):
     state = pending_auth.pop(user_id, None)
     if not state:
         return
     client = state.get("client")
     if client:
         try:
-            asyncio.create_task(client.disconnect())
+            await client.disconnect()
         except Exception:
             pass
     session_path = state.get("session_path")
@@ -34,7 +34,7 @@ def cleanup_pending(user_id: int):
 @bot.on_message(filters.command("add") & owner_filter)
 async def add_account_cmd(client: Client, message: Message):
     if OWNER_ID in pending_auth:
-        cleanup_pending(OWNER_ID)
+        await cleanup_pending(OWNER_ID)
     await message.reply("Send phone number (e.g. +380XXXXXXXXX):", reply_markup=CANCEL_MARKUP)
     pending_auth[OWNER_ID] = {"step": "phone"}
 
@@ -42,7 +42,7 @@ async def add_account_cmd(client: Client, message: Message):
 @bot.on_message(filters.command("cancel") & owner_filter)
 async def cancel_cmd(client: Client, message: Message):
     if OWNER_ID in pending_auth:
-        cleanup_pending(OWNER_ID)
+        await cleanup_pending(OWNER_ID)
         await message.reply("❌ Cancelled. Incomplete session files removed.")
     else:
         await message.reply("Nothing to cancel.")
@@ -51,7 +51,7 @@ async def cancel_cmd(client: Client, message: Message):
 @bot.on_callback_query(filters.regex(r'^auth:cancel$'))
 async def handle_auth_cancel(client: Client, callback: CallbackQuery):
     if OWNER_ID in pending_auth:
-        cleanup_pending(OWNER_ID)
+        await cleanup_pending(OWNER_ID)
         await callback.message.edit_text("❌ Cancelled. Incomplete session files removed.")
     else:
         await callback.message.edit_text("Nothing to cancel.")
@@ -69,21 +69,23 @@ async def handle_auth_input(client: Client, message: Message):
         phone = message.text.strip()
         session_path = os.path.join(SESSIONS_DIR, phone)
         auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
+        pending_auth[OWNER_ID] = {
+            "step": "phone",
+            "client": auth_client,
+            "session_path": session_path,
+        }
 
         try:
             await auth_client.connect()
             sent = await auth_client.send_code(phone)
-            pending_auth[OWNER_ID] = {
+            pending_auth[OWNER_ID].update({
                 "step": "code",
                 "phone": phone,
                 "hash": sent.phone_code_hash,
-                "client": auth_client,
-                "session_path": session_path
-            }
+            })
             await message.reply("Code sent. Enter the code from Telegram:", reply_markup=CANCEL_MARKUP)
         except Exception as e:
-            await auth_client.disconnect()
-            del pending_auth[OWNER_ID]
+            await cleanup_pending(OWNER_ID)
             await message.reply(f"❌ Error sending code: {e}\n\nUse /add to try again.")
 
     elif state["step"] == "code":
@@ -99,7 +101,7 @@ async def handle_auth_input(client: Client, message: Message):
         except (PhoneCodeInvalid, PhoneCodeExpired):
             await message.reply("❌ Invalid or expired code. Please enter the code again:", reply_markup=CANCEL_MARKUP)
         except Exception as e:
-            cleanup_pending(OWNER_ID)
+            await cleanup_pending(OWNER_ID)
             await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
 
     elif state["step"] == "2fa":
@@ -112,7 +114,7 @@ async def handle_auth_input(client: Client, message: Message):
         except PasswordHashInvalid:
             await message.reply("❌ Wrong password. Try again:", reply_markup=CANCEL_MARKUP)
         except Exception as e:
-            cleanup_pending(OWNER_ID)
+            await cleanup_pending(OWNER_ID)
             await message.reply(f"❌ Error: {e}\n\nUse /add to try again.")
 
 

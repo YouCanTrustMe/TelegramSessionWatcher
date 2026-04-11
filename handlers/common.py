@@ -25,9 +25,9 @@ def cb_encode(action: str, name: str) -> str:
     return f"{action}:#{key}"
 
 
-def cb_decode(raw: str) -> str:
+def cb_decode(raw: str) -> str | None:
     if raw.startswith("#"):
-        return _cb_map.get(raw[1:], raw)
+        return _cb_map.get(raw[1:])
     return raw
 
 CANCEL_MARKUP = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="auth:cancel")]])
