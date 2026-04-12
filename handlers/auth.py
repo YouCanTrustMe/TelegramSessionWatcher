@@ -6,8 +6,7 @@ from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeEx
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID
 from logger import get_logger
-from handlers import common
-from handlers.common import pending_auth, CANCEL_MARKUP
+from handlers.common import pending_auth, CANCEL_MARKUP, set_backup_task
 
 log = get_logger(__name__)
 
@@ -163,6 +162,4 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
     log.info(f"Account added via bot: {new_name}")
     await message.reply(f"✅ Account added: `{new_name}`\n⏳ Backup in 3 minutes...")
 
-    if common._backup_task and not common._backup_task.done():
-        common._backup_task.cancel()
-    common._backup_task = asyncio.create_task(schedule_backup_after_add())
+    set_backup_task(asyncio.create_task(schedule_backup_after_add()))

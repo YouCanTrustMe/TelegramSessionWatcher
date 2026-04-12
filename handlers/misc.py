@@ -4,12 +4,12 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import bot, owner_filter
-from config import LOGS_DIR, DATA_DIR, SCHEDULE_HOURS
+from config import LOGS_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, SCHEDULER_STATE_FILE
 
 
 def _load_batch_state() -> dict:
     try:
-        with open(os.path.join(DATA_DIR, "batch_state.json")) as f:
+        with open(BATCH_STATE_FILE) as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
@@ -17,7 +17,7 @@ def _load_batch_state() -> dict:
 
 def _load_scheduler_state() -> tuple:
     try:
-        with open(os.path.join(DATA_DIR, "scheduler_state.txt")) as f:
+        with open(SCHEDULER_STATE_FILE) as f:
             parts = f.read().strip().split("\n")
             return (
                 parts[0] if len(parts) > 0 else "",

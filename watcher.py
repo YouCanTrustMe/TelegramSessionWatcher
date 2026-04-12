@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 import os
 import shutil
 import random
@@ -7,7 +8,7 @@ from datetime import datetime
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
 from pyrogram.raw.functions.account import UpdateStatus
-from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS
+from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE
 from bot import send_notification
 from logger import get_logger
 
@@ -56,17 +57,38 @@ def _format_preview(msg) -> str:
     if msg.caption:
         cap = msg.caption if len(msg.caption) <= 200 else msg.caption[:200] + "..."
         return f"[media] {cap}"
-    if msg.photo: return "[photo]"
-    if msg.voice: return "[voice]"
-    if msg.video_note: return "[video note]"
-    if msg.video: return "[video]"
-    if msg.animation: return "[gif]"
-    if msg.sticker: return f"[sticker {msg.sticker.emoji or ''}]".strip()
-    if msg.audio: return "[audio]"
-    if msg.document: return "[file]"
-    if msg.location: return "[location]"
-    if msg.contact: return "[contact]"
+    if msg.photo:
+        return "[photo]"
+    if msg.voice:
+        return "[voice]"
+    if msg.video_note:
+        return "[video note]"
+    if msg.video:
+        return "[video]"
+    if msg.animation:
+        return "[gif]"
+    if msg.sticker:
+        return f"[sticker {msg.sticker.emoji or ''}]".strip()
+    if msg.audio:
+        return "[audio]"
+    if msg.document:
+        return "[file]"
+    if msg.location:
+        return "[location]"
+    if msg.contact:
+        return "[contact]"
     return "[message]"
+
+
+def _update_batch_state(hour: int):
+    try:
+        with open(BATCH_STATE_FILE) as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {}
+    state[str(hour)] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open(BATCH_STATE_FILE, "w") as f:
+        json.dump(state, f)
 
 async def check_account(name: str, session_path: str, _retry: bool = True) -> bool:
     client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
@@ -94,6 +116,7 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
             return result
 
         dialogs = await asyncio.wait_for(_collect_dialogs(), timeout=60)
+        unread_blocks = []
         for dialog in dialogs:
             if (
                 dialog.unread_messages_count > 0
@@ -103,11 +126,15 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
                 log.info(f"[{name}] Unread from: {chat_name}")
                 preview = _format_preview(dialog.top_message)
                 extra = dialog.unread_messages_count - 1
-                text = f"📩 Account [{name}]\nFrom: {chat_name}\n\n{preview}"
+                block = f"From: {chat_name}\n{preview}"
                 if extra > 0:
-                    text += f"\n\n+ {extra} more unread"
-                await send_notification(text)
-                has_unread = True
+                    block += f"\n+ {extra} more unread"
+                unread_blocks.append(block)
+
+        if unread_blocks:
+            header = f"📩 Account [{name}] — {len(unread_blocks)} chat(s)"
+            await send_notification(header + "\n\n" + "\n\n".join(unread_blocks))
+            has_unread = True
 
     except asyncio.TimeoutError:
         log.error(f"[{name}] get_dialogs timed out after 60s")
@@ -179,5 +206,8 @@ async def run_session(hour: int = None):
             )
             lines = [f"{header}\n"] + [f"{name} — {t}" for name, t in checked]
             await send_notification("\n".join(lines), silent=True)
+
+        if hour is not None:
+            _update_batch_state(hour)
 
         log.info("Session completed")

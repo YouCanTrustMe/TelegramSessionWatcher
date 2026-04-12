@@ -1,5 +1,4 @@
 import asyncio
-import json
 import os
 import signal
 from datetime import datetime
@@ -9,7 +8,7 @@ from pyrogram.types import Message
 from watcher import run_session
 from bot import bot, owner_filter
 from logger import get_logger
-from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR, DATA_DIR
+from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR, SCHEDULER_STATE_FILE
 import handlers
 
 log = get_logger(__name__)
@@ -40,32 +39,17 @@ async def exit_cmd(client, message: Message):
     _shutdown = True
 
 
-_STATE_FILE = os.path.join(DATA_DIR, "scheduler_state.txt")
-BATCH_STATE_FILE = os.path.join(DATA_DIR, "batch_state.json")
-
-
 def _read_state() -> tuple:
     try:
-        with open(_STATE_FILE) as f:
+        with open(SCHEDULER_STATE_FILE) as f:
             parts = f.read().strip().split("\n")
             return parts[0] if len(parts) > 0 else None, parts[1] if len(parts) > 1 else None
     except FileNotFoundError:
         return None, None
 
 
-def _update_batch_state(hour: int):
-    try:
-        with open(BATCH_STATE_FILE) as f:
-            state = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        state = {}
-    state[str(hour)] = datetime.now().strftime("%Y-%m-%d %H:%M")
-    with open(BATCH_STATE_FILE, "w") as f:
-        json.dump(state, f)
-
-
 def _write_state(session_key: Optional[str], backup_key: Optional[str]):
-    with open(_STATE_FILE, "w") as f:
+    with open(SCHEDULER_STATE_FILE, "w") as f:
         f.write(f"{session_key or ''}\n{backup_key or ''}")
 
 
@@ -81,7 +65,6 @@ async def scheduler():
                 log.info(f"Running session at {now.strftime('%H:%M')}")
                 try:
                     await run_session(hour=now.hour)
-                    _update_batch_state(now.hour)
                 except Exception as e:
                     log.error(f"run_session failed: {e}")
                 last_session_run = key

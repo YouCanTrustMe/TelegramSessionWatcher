@@ -8,7 +8,7 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, ARCHIVE_DIR
 from logger import get_logger
-from handlers.common import get_session_names, build_pagination, cb_encode, cb_decode
+from handlers.common import get_session_names, build_pagination, cb_encode, cb_decode, move_session_files
 
 log = get_logger(__name__)
 
@@ -68,13 +68,16 @@ async def handle_confirm_remove(client: Client, callback: CallbackQuery):
         return
 
     os.makedirs(ARCHIVE_DIR, exist_ok=True)
-    archive_path = os.path.join(ARCHIVE_DIR, f"{session_name}.session")
-    if os.path.exists(archive_path):
-        archive_path = os.path.join(ARCHIVE_DIR, f"{session_name}_{int(time.time())}.session")
+    dst_name = session_name
+    if os.path.exists(os.path.join(ARCHIVE_DIR, f"{dst_name}.session")):
+        dst_name = f"{session_name}_{int(time.time())}"
 
-    os.rename(session_path, archive_path)
-    log.info(f"Account archived: {session_name}")
-    await callback.message.edit_text(f"📦 Account `{session_name}` moved to archive.")
+    move_session_files(
+        os.path.join(SESSIONS_DIR, session_name),
+        os.path.join(ARCHIVE_DIR, dst_name),
+    )
+    log.info(f"Account archived: {dst_name}")
+    await callback.message.edit_text(f"📦 Account `{dst_name}` moved to archive.")
     await callback.answer()
 
 
@@ -183,20 +186,19 @@ async def handle_unarchive_callback(client: Client, callback: CallbackQuery):
 
 
 async def do_unarchive(message: Message, session_name: str):
-    archive_path = os.path.join(ARCHIVE_DIR, f"{session_name}.session")
-
-    if not os.path.exists(archive_path):
+    if not os.path.exists(os.path.join(ARCHIVE_DIR, f"{session_name}.session")):
         await message.reply(f"Session `{session_name}` not found in archive.")
         return
 
-    dest_path = os.path.join(SESSIONS_DIR, f"{session_name}.session")
-    if os.path.exists(dest_path):
-        dest_path = os.path.join(SESSIONS_DIR, f"{session_name}_{int(time.time())}.session")
+    restored_name = session_name
+    if os.path.exists(os.path.join(SESSIONS_DIR, f"{restored_name}.session")):
+        restored_name = f"{session_name}_{int(time.time())}"
 
     os.makedirs(SESSIONS_DIR, exist_ok=True)
-    os.rename(archive_path, dest_path)
-
-    restored_name = os.path.basename(dest_path).replace(".session", "")
+    move_session_files(
+        os.path.join(ARCHIVE_DIR, session_name),
+        os.path.join(SESSIONS_DIR, restored_name),
+    )
     log.info(f"Session unarchived: {restored_name}")
     await message.reply(f"✅ Session `{restored_name}` moved back to active sessions.")
 

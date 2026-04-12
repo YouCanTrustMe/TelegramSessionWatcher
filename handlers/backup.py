@@ -7,7 +7,7 @@ import pyzipper
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from bot import bot, owner_filter
-from config import OWNER_ID, BACKUP_PASSWORD, DATA_DIR
+from config import OWNER_ID, BACKUP_PASSWORD, DATA_DIR, BASE_DIR
 from logger import get_logger
 
 log = get_logger(__name__)
@@ -121,10 +121,9 @@ async def restore_cmd(client: Client, message: Message):
                     raise ValueError(f"Unsafe path in archive: {info.filename}")
             zf.extractall(tmp_dir)
 
-        # snapshot existing items for rollback
         rollback = {}
         for item in os.listdir(tmp_dir):
-            dst = item
+            dst = os.path.join(BASE_DIR, item)
             if os.path.exists(dst):
                 backup_copy = f"{dst}_rollback"
                 if os.path.isdir(dst):
@@ -136,14 +135,14 @@ async def restore_cmd(client: Client, message: Message):
         try:
             for item in os.listdir(tmp_dir):
                 src = os.path.join(tmp_dir, item)
-                dst = item
+                dst = os.path.join(BASE_DIR, item)
                 if os.path.isdir(src):
                     if os.path.exists(dst):
                         shutil.rmtree(dst)
                     shutil.copytree(src, dst)
                 else:
                     shutil.copy2(src, dst)
-        except Exception as e:
+        except Exception:
             for dst, backup_copy in rollback.items():
                 if os.path.isdir(backup_copy):
                     if os.path.exists(dst):

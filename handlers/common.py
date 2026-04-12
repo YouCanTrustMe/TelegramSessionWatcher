@@ -10,6 +10,13 @@ PAGE_SIZE = 10
 pending_auth: dict = {}
 _backup_task: Optional[asyncio.Task] = None
 
+
+def set_backup_task(task: asyncio.Task):
+    global _backup_task
+    if _backup_task and not _backup_task.done():
+        _backup_task.cancel()
+    _backup_task = task
+
 _cb_map: dict[str, str] = {}
 _cb_seq: int = 0
 
@@ -40,6 +47,13 @@ def get_session_names(include_archived: bool = False) -> list:
         archived = glob.glob(os.path.join(ARCHIVE_DIR, "*.session"))
         names += sorted([f"[archived] {os.path.basename(s).replace('.session', '')}" for s in archived])
     return names
+
+
+def move_session_files(src_base: str, dst_base: str):
+    for ext in (".session", ".session-journal"):
+        src = f"{src_base}{ext}"
+        if os.path.exists(src):
+            os.rename(src, f"{dst_base}{ext}")
 
 
 def build_pagination(names: list, page: int, action: str) -> tuple:

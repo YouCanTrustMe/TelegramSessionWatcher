@@ -17,6 +17,7 @@ BACKUP_DAY = int(os.getenv("BACKUP_DAY", "0"))
 BACKUP_HOUR = int(os.getenv("BACKUP_HOUR", "9"))
 SCHEDULE_HOURS = [int(h) for h in os.getenv("SCHEDULE_HOURS", "7,10,13,16,20,23,1,3,5,6").split(",")]
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = "data"
 SESSIONS_DIR = os.path.join(DATA_DIR, "sessions")
 ARCHIVE_DIR = os.path.join(DATA_DIR, "archive")
@@ -24,6 +25,9 @@ INVALID_DIR = os.path.join(DATA_DIR, "invalid")
 LOGS_DIR = os.path.join(DATA_DIR, "logs")
 TDATA_DIR = os.path.join(DATA_DIR, "tdata")
 TEMP_DIR = os.path.join(DATA_DIR, "temp")
+
+SCHEDULER_STATE_FILE = os.path.join(DATA_DIR, "scheduler_state.txt")
+BATCH_STATE_FILE = os.path.join(DATA_DIR, "batch_state.json")
 
 for _d in (SESSIONS_DIR, ARCHIVE_DIR, INVALID_DIR, LOGS_DIR, TDATA_DIR, TEMP_DIR):
     os.makedirs(_d, exist_ok=True)

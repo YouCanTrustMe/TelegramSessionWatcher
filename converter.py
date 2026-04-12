@@ -66,7 +66,9 @@ def pyrogram_to_telethon(pyrogram_path: str, telethon_path: str):
         5: ("91.108.56.130", 443),
     }
 
-    server, port = dc_servers.get(dc_id, ("149.154.167.51", 443))
+    if dc_id not in dc_servers:
+        raise ValueError(f"Unknown DC id: {dc_id}")
+    server, port = dc_servers[dc_id]
 
     telethon_cursor.execute("INSERT OR REPLACE INTO version VALUES (7)")
     telethon_cursor.execute(
