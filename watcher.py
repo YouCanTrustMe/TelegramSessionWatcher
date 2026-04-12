@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import os
 import shutil
 import random
@@ -38,13 +39,34 @@ def get_batch_for_hour(hour: int) -> list:
         return all_sessions
     idx = SCHEDULE_HOURS.index(hour)
     return [(name, path) for name, path in all_sessions
-            if sum(ord(c) for c in name) % len(SCHEDULE_HOURS) == idx]
+            if int(hashlib.md5(name.encode()).hexdigest(), 16) % len(SCHEDULE_HOURS) == idx]
 
 
 def _random_delay() -> float:
     if random.random() < 0.2:
         return random.uniform(15.0, 30.0)
     return random.uniform(3.0, 8.0)
+
+
+def _format_preview(msg) -> str:
+    if msg is None:
+        return "[no preview]"
+    if msg.text:
+        return msg.text if len(msg.text) <= 200 else msg.text[:200] + "..."
+    if msg.caption:
+        cap = msg.caption if len(msg.caption) <= 200 else msg.caption[:200] + "..."
+        return f"[media] {cap}"
+    if msg.photo: return "[photo]"
+    if msg.voice: return "[voice]"
+    if msg.video_note: return "[video note]"
+    if msg.video: return "[video]"
+    if msg.animation: return "[gif]"
+    if msg.sticker: return f"[sticker {msg.sticker.emoji or ''}]".strip()
+    if msg.audio: return "[audio]"
+    if msg.document: return "[file]"
+    if msg.location: return "[location]"
+    if msg.contact: return "[contact]"
+    return "[message]"
 
 async def check_account(name: str, session_path: str, _retry: bool = True) -> bool:
     client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
@@ -79,7 +101,12 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
             ):
                 chat_name = dialog.chat.first_name or dialog.chat.title or "Unknown"
                 log.info(f"[{name}] Unread from: {chat_name}")
-                await send_notification(f"📩 Account [{name}]\nNew message from: {chat_name}")
+                preview = _format_preview(dialog.top_message)
+                extra = dialog.unread_messages_count - 1
+                text = f"📩 Account [{name}]\nFrom: {chat_name}\n\n{preview}"
+                if extra > 0:
+                    text += f"\n\n+ {extra} more unread"
+                await send_notification(text)
                 has_unread = True
 
     except asyncio.TimeoutError:
@@ -143,10 +170,14 @@ async def run_session(hour: int = None):
                 log.debug(f"Waiting {delay:.1f}s before next account")
                 await asyncio.sleep(delay)
 
-        if not any_unread:
-            start_time = checked[0][1] if checked else datetime.now().strftime("%H:%M")
-            lines = [f"✅ {start_time} — {len(checked)} checked, no new messages\n"]
-            lines += [f"{name} — {t}" for name, t in checked]
+        if checked:
+            start_time = checked[0][1]
+            header = (
+                f"✅ {start_time} — {len(checked)} checked, see messages above"
+                if any_unread
+                else f"✅ {start_time} — {len(checked)} checked, no new messages"
+            )
+            lines = [f"{header}\n"] + [f"{name} — {t}" for name, t in checked]
             await send_notification("\n".join(lines), silent=True)
 
         log.info("Session completed")

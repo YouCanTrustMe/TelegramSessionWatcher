@@ -3,11 +3,8 @@ import os
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery
 from bot import bot, owner_filter
-from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, OWNER_ID
-from logger import get_logger
-from handlers.common import build_pagination, pending_auth, CANCEL_MARKUP, cb_decode
-
-log = get_logger(__name__)
+from config import INVALID_DIR, OWNER_ID
+from handlers.common import build_pagination, pending_auth, cb_decode
 
 
 def get_invalid_names(include_done: bool = False) -> list:
@@ -56,6 +53,8 @@ async def handle_reauth_callback(client: Client, callback: CallbackQuery):
 
 
 async def start_reauth(message: Message, session_name: str):
+    from handlers.auth import cleanup_pending, start_code_request
+
     invalid_path = os.path.join(INVALID_DIR, session_name)
     if not os.path.exists(f"{invalid_path}.session"):
         await message.reply(f"Session `{session_name}` not found in invalid.")
@@ -65,31 +64,11 @@ async def start_reauth(message: Message, session_name: str):
     phone = f"+{phone_part}" if not phone_part.startswith("+") else phone_part
 
     if OWNER_ID in pending_auth:
-        from handlers.auth import cleanup_pending
         await cleanup_pending(OWNER_ID)
 
-    session_path = os.path.join(SESSIONS_DIR, phone)
-    auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
-    pending_auth[OWNER_ID] = {
-        "step": "phone",
-        "client": auth_client,
-        "session_path": session_path,
-        "reauth_source": invalid_path,
-    }
-
-    try:
-        await auth_client.connect()
-        sent = await auth_client.send_code(phone)
-        pending_auth[OWNER_ID].update({
-            "step": "code",
-            "phone": phone,
-            "hash": sent.phone_code_hash,
-        })
-        await message.reply(
-            f"Re-auth for `{session_name}`\nCode sent to `{phone}`. Enter the code:",
-            reply_markup=CANCEL_MARKUP
-        )
-    except Exception as e:
-        from handlers.auth import cleanup_pending
-        await cleanup_pending(OWNER_ID)
-        await message.reply(f"❌ Error sending code: {e}")
+    await start_code_request(
+        message,
+        phone,
+        success_text=f"Re-auth for `{session_name}`\nCode sent to `{phone}`. Enter the code:",
+        extra_state={"reauth_source": invalid_path},
+    )

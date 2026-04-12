@@ -31,6 +31,36 @@ async def cleanup_pending(user_id: int):
                 log.info(f"Removed incomplete session file: {path}")
 
 
+async def start_code_request(
+    message: Message,
+    phone: str,
+    success_text: str,
+    error_suffix: str = "",
+    extra_state: dict | None = None,
+) -> bool:
+    session_path = os.path.join(SESSIONS_DIR, phone)
+    auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
+    state = {"step": "phone", "client": auth_client, "session_path": session_path}
+    if extra_state:
+        state.update(extra_state)
+    pending_auth[OWNER_ID] = state
+
+    try:
+        await auth_client.connect()
+        sent = await auth_client.send_code(phone)
+        pending_auth[OWNER_ID].update({
+            "step": "code",
+            "phone": phone,
+            "hash": sent.phone_code_hash,
+        })
+        await message.reply(success_text, reply_markup=CANCEL_MARKUP)
+        return True
+    except Exception as e:
+        await cleanup_pending(OWNER_ID)
+        await message.reply(f"❌ Error sending code: {e}{error_suffix}")
+        return False
+
+
 @bot.on_message(filters.command("add") & owner_filter)
 async def add_account_cmd(client: Client, message: Message):
     if OWNER_ID in pending_auth:
@@ -67,26 +97,12 @@ async def handle_auth_input(client: Client, message: Message):
 
     if state["step"] == "phone":
         phone = message.text.strip()
-        session_path = os.path.join(SESSIONS_DIR, phone)
-        auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
-        pending_auth[OWNER_ID] = {
-            "step": "phone",
-            "client": auth_client,
-            "session_path": session_path,
-        }
-
-        try:
-            await auth_client.connect()
-            sent = await auth_client.send_code(phone)
-            pending_auth[OWNER_ID].update({
-                "step": "code",
-                "phone": phone,
-                "hash": sent.phone_code_hash,
-            })
-            await message.reply("Code sent. Enter the code from Telegram:", reply_markup=CANCEL_MARKUP)
-        except Exception as e:
-            await cleanup_pending(OWNER_ID)
-            await message.reply(f"❌ Error sending code: {e}\n\nUse /add to try again.")
+        await start_code_request(
+            message,
+            phone,
+            success_text="Code sent. Enter the code from Telegram:",
+            error_suffix="\n\nUse /add to try again.",
+        )
 
     elif state["step"] == "code":
         code = message.text.strip()
