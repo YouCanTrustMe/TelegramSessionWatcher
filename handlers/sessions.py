@@ -141,6 +141,24 @@ async def do_info(message: Message, session_name: str):
         except Exception:
             pass
 
+    import store
+    meta = store.get_account(clean_name)
+    meta_block = ""
+    if meta:
+        meta_lines = []
+        if meta["added_at"]:
+            meta_lines.append(f"Added: `{meta['added_at']}`")
+        if meta["invalid_count"]:
+            meta_lines.append(f"Invalid count: `{meta['invalid_count']}`")
+        if meta["last_reauth"]:
+            meta_lines.append(f"Last reauth: `{meta['last_reauth']}`")
+        if meta["last_unread"]:
+            meta_lines.append(f"Last unread: `{meta['last_unread']}`")
+        if meta["notes"]:
+            meta_lines.append(f"Notes: {meta['notes']}")
+        if meta_lines:
+            meta_block = "\n" + "\n".join(meta_lines)
+
     await message.reply(
         f"**Account info:**\n"
         f"Name: `{clean_name}`\n"
@@ -151,6 +169,7 @@ async def do_info(message: Message, session_name: str):
         f"File status: `{file_status}`\n"
         f"Size: `{size} bytes`\n"
         f"Last modified: `{modified}`"
+        f"{meta_block}"
     )
 
 

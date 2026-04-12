@@ -90,7 +90,7 @@ async def run_session_cmd(client: Client, message: Message):
     parts = message.text.split()
     if len(parts) < 2:
         hours_str = ", ".join(str(h) for h in SCHEDULE_HOURS)
-        await message.reply(f"Usage: `/run <hour>`\nAvailable hours: {hours_str}")
+        await message.reply(f"Usage: /run hour\nAvailable hours: {hours_str}")
         return
 
     try:
@@ -144,3 +144,29 @@ async def log_file_callback(client: Client, callback: CallbackQuery):
     await callback.answer()
     now = datetime.now()
     await callback.message.reply_document(log_path, caption=f"📋 Log for `{now.strftime('%Y-%m-%d')}`")
+
+
+@bot.on_message(filters.command("note") & owner_filter)
+async def note_cmd(client: Client, message: Message):
+    import store
+
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 2:
+        await message.reply(
+            "Usage: /note session_name text\n"
+            "Pass empty text to clear: /note session_name"
+        )
+        return
+
+    name = parts[1].strip()
+    text = parts[2].strip() if len(parts) > 2 else ""
+
+    if store.get_account(name) is None:
+        await message.reply(f"Account `{name}` not found in metadata store.")
+        return
+
+    store.set_note(name, text)
+    if text:
+        await message.reply(f"📝 Note for `{name}` saved.")
+    else:
+        await message.reply(f"📝 Note for `{name}` cleared.")

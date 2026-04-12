@@ -135,6 +135,7 @@ async def handle_auth_input(client: Client, message: Message):
 
 async def finish_auth(message: Message, auth_client: Client, state: dict):
     from handlers.backup import schedule_backup_after_add
+    import store
 
     me = await auth_client.get_me()
     first = me.first_name or ""
@@ -157,6 +158,9 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
             if os.path.exists(src):
                 os.rename(src, f"{reauth_source}_done{ext}")
         log.info(f"Reauth complete, marked as done: {reauth_source}")
+        store.mark_reauth(new_name)
+    else:
+        store.add_account(new_name)
 
     del pending_auth[OWNER_ID]
     log.info(f"Account added via bot: {new_name}")

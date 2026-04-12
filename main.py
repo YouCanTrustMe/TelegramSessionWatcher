@@ -9,6 +9,7 @@ from watcher import run_session
 from bot import bot, owner_filter
 from logger import get_logger
 from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR, SCHEDULER_STATE_FILE
+from store import init_db
 import handlers
 
 log = get_logger(__name__)
@@ -89,6 +90,7 @@ async def scheduler():
 
 async def main():
     log.info("TelegramSessionWatcher started")
+    init_db()
     await bot.start()
     me = await bot.get_me()
     log.info(f"Bot started: @{me.username}")

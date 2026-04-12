@@ -11,6 +11,7 @@ from pyrogram.raw.functions.account import UpdateStatus
 from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE
 from bot import send_notification
 from logger import get_logger
+import store
 
 log = get_logger(__name__)
 _session_lock = asyncio.Lock()
@@ -21,6 +22,7 @@ def move_to_invalid(name: str, session_path: str):
         src = f"{session_path}{ext}"
         if os.path.exists(src):
             shutil.move(src, f"{dest}{ext}")
+    store.bump_invalid(name)
     log.info(f"[{name}] Moved to invalid/")
 
 
@@ -134,6 +136,7 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
         if unread_blocks:
             header = f"📩 Account [{name}] — {len(unread_blocks)} chat(s)"
             await send_notification(header + "\n\n" + "\n\n".join(unread_blocks))
+            store.mark_unread(name)
             has_unread = True
 
     except asyncio.TimeoutError:
