@@ -15,21 +15,30 @@ log = get_logger(__name__)
 GITIGNORE_PATHS = [DATA_DIR, ".env", "bot.session"]
 
 
-def _build_zip_sync(zip_path: str) -> tuple[list, list, int]:
-    dir_stats = []
+def _collect_stats() -> tuple[list, list, int]:
+    folder_stats = []
     file_list = []
-    total_files = 0
 
     for path in GITIGNORE_PATHS:
         if not os.path.exists(path):
             continue
-        if os.path.isdir(path):
-            count = sum(len(fs) for _, _, fs in os.walk(path))
-            dir_stats.append((path, count))
-            total_files += count
-        elif os.path.isfile(path):
+        if os.path.isfile(path):
             file_list.append(path)
-            total_files += 1
+        elif os.path.isdir(path):
+            for entry in sorted(os.listdir(path)):
+                full = os.path.join(path, entry)
+                if os.path.isdir(full):
+                    count = sum(len(fs) for _, _, fs in os.walk(full))
+                    folder_stats.append((full, count))
+                elif os.path.isfile(full):
+                    file_list.append(full)
+
+    total_files = sum(c for _, c in folder_stats) + len(file_list)
+    return folder_stats, file_list, total_files
+
+
+def _build_zip_sync(zip_path: str) -> tuple[list, list, int]:
+    folder_stats, file_list, total_files = _collect_stats()
 
     if not BACKUP_PASSWORD:
         raise ValueError("BACKUP_PASSWORD is not set in .env")
@@ -47,21 +56,25 @@ def _build_zip_sync(zip_path: str) -> tuple[list, list, int]:
                         fp = os.path.join(root, f)
                         zf.write(fp, fp)
 
-    return dir_stats, file_list, total_files
+    return folder_stats, file_list, total_files
 
 
 async def do_backup() -> None:
     date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
     zip_path = os.path.join(tempfile.gettempdir(), f"tsw_backup_{date_str}.zip")
 
-    dir_stats, file_list, total_files = await asyncio.to_thread(_build_zip_sync, zip_path)
+    folder_stats, file_list, total_files = await asyncio.to_thread(_build_zip_sync, zip_path)
 
-    lines = [f"**📦 `tsw_backup_{date_str}.zip`**\n"]
-    for path, count in dir_stats:
-        lines.append(f"📁 __{path}/__ — `{count}` file(s)")
-    for path in file_list:
-        lines.append(f"📄 `{path}`")
-    lines.append(f"\n> 🗂 Total: **{total_files}** file(s)")
+    lines = [f"**📦 `tsw_backup_{date_str}.zip`**"]
+    if folder_stats:
+        lines.append("\n📁 **Folders:**")
+        for path, count in folder_stats:
+            lines.append(f"• `{path}/` — `{count}`")
+    if file_list:
+        lines.append("\n📄 **Files:**")
+        for path in file_list:
+            lines.append(f"• `{path}`")
+    lines.append(f"\n🗂 **Total:** `{total_files}` file(s)")
     caption = "\n".join(lines)
 
     try:

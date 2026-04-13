@@ -143,7 +143,7 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
                 extra = dialog.unread_messages_count - 1
                 block = f"From: {chat_name}\n{preview}"
                 if extra > 0:
-                    block += f"\n+ {extra} more unread"
+                    block += f"\n**__↪ + {extra} more unread__**"
                 unread_blocks.append(block)
 
         if unread_blocks:
