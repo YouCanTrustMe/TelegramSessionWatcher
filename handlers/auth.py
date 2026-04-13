@@ -6,7 +6,7 @@ from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeEx
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID
 from logger import get_logger
-from handlers.common import pending_auth, CANCEL_MARKUP, set_backup_task
+from handlers.common import pending_auth, pending_note, CANCEL_MARKUP, set_backup_task
 
 log = get_logger(__name__)
 
@@ -68,20 +68,14 @@ async def add_account_cmd(client: Client, message: Message):
     pending_auth[OWNER_ID] = {"step": "phone"}
 
 
-@bot.on_message(filters.command("cancel") & owner_filter)
-async def cancel_cmd(client: Client, message: Message):
-    if OWNER_ID in pending_auth:
-        await cleanup_pending(OWNER_ID)
-        await message.reply("❌ Cancelled. Incomplete session files removed.")
-    else:
-        await message.reply("Nothing to cancel.")
-
-
 @bot.on_callback_query(filters.regex(r'^auth:cancel$'))
 async def handle_auth_cancel(client: Client, callback: CallbackQuery):
     if OWNER_ID in pending_auth:
         await cleanup_pending(OWNER_ID)
         await callback.message.edit_text("❌ Cancelled. Incomplete session files removed.")
+    elif OWNER_ID in pending_note:
+        pending_note.pop(OWNER_ID, None)
+        await callback.message.edit_text("❌ Note cancelled.")
     else:
         await callback.message.edit_text("Nothing to cancel.")
     await callback.answer()
@@ -90,7 +84,8 @@ async def handle_auth_cancel(client: Client, callback: CallbackQuery):
 @bot.on_message(owner_filter & filters.text & ~filters.regex(r'^/'))
 async def handle_auth_input(client: Client, message: Message):
     if OWNER_ID not in pending_auth:
-        return
+        from pyrogram import ContinuePropagation
+        raise ContinuePropagation
 
     state = pending_auth[OWNER_ID]
 

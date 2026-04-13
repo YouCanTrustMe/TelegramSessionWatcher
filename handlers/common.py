@@ -8,6 +8,7 @@ from config import SESSIONS_DIR, ARCHIVE_DIR
 PAGE_SIZE = 10
 
 pending_auth: dict = {}
+pending_note: dict = {}
 _backup_task: Optional[asyncio.Task] = None
 
 

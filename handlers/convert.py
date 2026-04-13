@@ -11,20 +11,6 @@ import store
 log = get_logger(__name__)
 
 
-@bot.on_message(filters.command("convert") & owner_filter)
-async def convert_account_cmd(client: Client, message: Message):
-    parts = message.text.split(maxsplit=1)
-    if len(parts) >= 2:
-        await do_convert(message, parts[1].strip())
-        return
-
-    names = get_session_names(include_archived=True)
-    if not names:
-        await message.reply("No accounts found.")
-        return
-    text, markup = build_pagination(names, 0, "convert")
-    await message.reply(text, reply_markup=markup)
-
 
 @bot.on_callback_query(filters.regex(r'^convert:'))
 async def handle_convert_callback(client: Client, callback: CallbackQuery):

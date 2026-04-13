@@ -17,30 +17,6 @@ def get_invalid_names(include_done: bool = False) -> list:
     return sorted(names)
 
 
-@bot.on_message(filters.command("invalid") & owner_filter)
-async def invalid_cmd(client: Client, message: Message):
-    names = get_invalid_names(include_done=True)
-    if not names:
-        await message.reply("No invalid sessions found.")
-        return
-    text, markup = build_pagination(names, 0, "invalid")
-    await message.reply(text, reply_markup=markup)
-
-
-@bot.on_message(filters.command("reauth") & owner_filter)
-async def reauth_cmd(client: Client, message: Message):
-    parts = message.text.split(maxsplit=1)
-    if len(parts) >= 2:
-        await start_reauth(message, parts[1].strip())
-        return
-
-    names = get_invalid_names()
-    if not names:
-        await message.reply("No invalid sessions found.")
-        return
-    text, markup = build_pagination(names, 0, "reauth")
-    await message.reply(text, reply_markup=markup)
-
 
 @bot.on_callback_query(filters.regex(r'^reauth:'))
 async def handle_reauth_callback(client: Client, callback: CallbackQuery):

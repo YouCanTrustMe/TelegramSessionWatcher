@@ -8,12 +8,79 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, ARCHIVE_DIR
 from logger import get_logger
-from handlers.common import get_session_names, build_pagination, cb_encode, cb_decode, move_session_files
+from handlers.common import (
+    get_session_names, build_pagination, cb_encode, cb_decode,
+    move_session_files, pending_note, PAGE_SIZE, CANCEL_MARKUP,
+)
 
 log = get_logger(__name__)
 
 
 MAX_SEARCH_RESULTS = 50
+
+
+TAB_ACTIVE = "a"
+TAB_ARCHIVE = "z"
+TAB_INVALID = "i"
+_TAB_LABELS = {TAB_ACTIVE: "Active", TAB_ARCHIVE: "Archive", TAB_INVALID: "Invalid"}
+_TAB_ICONS = {TAB_ACTIVE: "🟢", TAB_ARCHIVE: "🗄", TAB_INVALID: "⚠️"}
+
+
+def _tab_names(tab: str) -> list:
+    from handlers.invalid import get_invalid_names
+    if tab == TAB_ARCHIVE:
+        archived = glob.glob(os.path.join(ARCHIVE_DIR, "*.session")) if os.path.isdir(ARCHIVE_DIR) else []
+        return sorted([os.path.basename(s).replace(".session", "") for s in archived])
+    if tab == TAB_INVALID:
+        return get_invalid_names(include_done=True)
+    return get_session_names()
+
+
+def _tab_counts() -> dict:
+    from handlers.invalid import get_invalid_names
+    archived = glob.glob(os.path.join(ARCHIVE_DIR, "*.session")) if os.path.isdir(ARCHIVE_DIR) else []
+    return {
+        TAB_ACTIVE: len(get_session_names()),
+        TAB_ARCHIVE: len(archived),
+        TAB_INVALID: len(get_invalid_names(include_done=True)),
+    }
+
+
+def _build_list_view(tab: str, page: int):
+    names = _tab_names(tab)
+    counts = _tab_counts()
+    total = len(names)
+    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, pages - 1))
+    chunk = names[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+
+    icon = _TAB_ICONS[tab]
+    label = _TAB_LABELS[tab]
+    if total == 0:
+        text = f"**📒 {icon} {label}** — empty"
+    else:
+        text = f"**📒 {icon} {label}** — `{total}` · page {page + 1}/{pages}"
+
+    rows = [[InlineKeyboardButton(n, callback_data=cb_encode(f"la_{tab}", n))] for n in chunk]
+
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("« Prev", callback_data=f"lt:{tab}:{page - 1}"))
+    if page < pages - 1:
+        nav.append(InlineKeyboardButton("Next »", callback_data=f"lt:{tab}:{page + 1}"))
+    if nav:
+        rows.append(nav)
+
+    tab_row = []
+    for t in (TAB_ACTIVE, TAB_ARCHIVE, TAB_INVALID):
+        mark = "• " if t == tab else ""
+        tab_row.append(InlineKeyboardButton(
+            f"{mark}{_TAB_ICONS[t]} {_TAB_LABELS[t]} ({counts[t]})",
+            callback_data=f"lt:{t}:0",
+        ))
+    rows.append(tab_row)
+
+    return text, InlineKeyboardMarkup(rows)
 
 
 @bot.on_message(filters.command("list") & owner_filter)
@@ -22,13 +89,94 @@ async def list_accounts(client: Client, message: Message):
     if len(parts) >= 2:
         await _list_search(message, parts[1].strip())
         return
-
-    names = get_session_names()
-    if not names:
-        await message.reply("No accounts found.")
-        return
-    text, markup = build_pagination(names, 0, "list")
+    text, markup = _build_list_view(TAB_ACTIVE, 0)
     await message.reply(text, reply_markup=markup)
+
+
+@bot.on_callback_query(filters.regex(r'^lt:') & owner_filter)
+async def handle_list_tab(client: Client, callback: CallbackQuery):
+    _, tab, page = callback.data.split(":")
+    text, markup = _build_list_view(tab, int(page))
+    try:
+        await callback.message.edit_text(text, reply_markup=markup)
+    except Exception:
+        await callback.message.reply(text, reply_markup=markup)
+    await callback.answer()
+
+
+@bot.on_callback_query(filters.regex(r'^la_') & owner_filter)
+async def handle_list_account(client: Client, callback: CallbackQuery):
+    prefix, raw = callback.data.split(":", 1)
+    tab = prefix[3:]
+    name = cb_decode(raw)
+    if name is None:
+        await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
+        return
+    await callback.answer()
+
+    buttons = []
+    if tab == TAB_ACTIVE:
+        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode("info", name)))
+        buttons.append(InlineKeyboardButton("🗄 Archive", callback_data=cb_encode("remove", name)))
+        buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode("list_note", name)))
+    elif tab == TAB_ARCHIVE:
+        arch_name = f"[archived] {name}"
+        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode("info", arch_name)))
+        buttons.append(InlineKeyboardButton("↩️ Unarchive", callback_data=cb_encode("unarchive", name)))
+        buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", arch_name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode("list_note", name)))
+    elif tab == TAB_INVALID:
+        base_name = name.removesuffix("_done").removesuffix("_invalid")
+        buttons.append(InlineKeyboardButton("🔑 Reauth", callback_data=cb_encode("reauth", name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode("list_note", base_name)))
+
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton("« Back to list", callback_data=f"lt:{tab}:0")])
+    try:
+        await callback.message.edit_text(
+            f"**`{name}`**\nSelect action:",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+    except Exception:
+        await callback.message.reply(
+            f"**`{name}`**\nSelect action:",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
+
+
+@bot.on_callback_query(filters.regex(r'^list_note:') & owner_filter)
+async def handle_list_note(client: Client, callback: CallbackQuery):
+    from config import OWNER_ID
+    name = cb_decode(callback.data.split(":", 1)[1])
+    if name is None:
+        await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
+        return
+    await callback.answer()
+    pending_note[OWNER_ID] = {"session": name}
+    await callback.message.reply(
+        f"📝 Send note text for `{name}` (empty message clears the note):",
+        reply_markup=CANCEL_MARKUP,
+    )
+
+
+@bot.on_message(owner_filter & filters.text & ~filters.regex(r'^/'))
+async def handle_note_input(client: Client, message: Message):
+    from config import OWNER_ID
+    import store
+    if OWNER_ID not in pending_note:
+        return
+    state = pending_note.pop(OWNER_ID)
+    name = state["session"]
+    if store.get_account(name) is None:
+        await message.reply(f"Account `{name}` not found in metadata store.")
+        return
+    text = message.text.strip()
+    store.set_note(name, text)
+    if text:
+        await message.reply(f"📝 Note for `{name}` saved.")
+    else:
+        await message.reply(f"📝 Note for `{name}` cleared.")
 
 
 async def _list_search(message: Message, query: str):
@@ -52,20 +200,6 @@ async def _list_search(message: Message, query: str):
         lines.append(f"\n_…and {len(hits) - MAX_SEARCH_RESULTS} more. Refine the query._")
     await message.reply("\n".join(lines))
 
-
-@bot.on_message(filters.command("archive") & owner_filter)
-async def archive_account(client: Client, message: Message):
-    parts = message.text.split(maxsplit=1)
-    if len(parts) >= 2:
-        await ask_remove_confirm(message, parts[1].strip())
-        return
-
-    names = get_session_names()
-    if not names:
-        await message.reply("No accounts found.")
-        return
-    text, markup = build_pagination(names, 0, "remove")
-    await message.reply(text, reply_markup=markup)
 
 
 async def ask_remove_confirm(message: Message, session_name: str):
@@ -116,20 +250,6 @@ async def handle_cancel_remove(client: Client, callback: CallbackQuery):
     await callback.message.edit_text("❌ Removal cancelled.")
     await callback.answer()
 
-
-@bot.on_message(filters.command("info") & owner_filter)
-async def info_account_cmd(client: Client, message: Message):
-    parts = message.text.split(maxsplit=1)
-    if len(parts) >= 2:
-        await do_info(message, parts[1].strip())
-        return
-
-    names = get_session_names(include_archived=True)
-    if not names:
-        await message.reply("No accounts found.")
-        return
-    text, markup = build_pagination(names, 0, "info")
-    await message.reply(text, reply_markup=markup)
 
 
 async def do_info(message: Message, session_name: str):
@@ -202,26 +322,6 @@ async def do_info(message: Message, session_name: str):
         f"{meta_block}"
     )
 
-
-@bot.on_message(filters.command("unarchive") & owner_filter)
-async def unarchive_account_cmd(client: Client, message: Message):
-    parts = message.text.split(maxsplit=1)
-    if len(parts) >= 2:
-        await do_unarchive(message, parts[1].strip())
-        return
-
-    if not os.path.isdir(ARCHIVE_DIR):
-        await message.reply("Archive is empty.")
-        return
-
-    archived = glob.glob(os.path.join(ARCHIVE_DIR, "*.session"))
-    names = sorted([os.path.basename(s).replace(".session", "") for s in archived])
-    if not names:
-        await message.reply("Archive is empty.")
-        return
-
-    text, markup = build_pagination(names, 0, "unarchive")
-    await message.reply(text, reply_markup=markup)
 
 
 @bot.on_callback_query(filters.regex(r'^unarchive:'))
