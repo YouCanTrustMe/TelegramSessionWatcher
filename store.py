@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 from config import DATA_DIR, SESSIONS_DIR, ARCHIVE_DIR
 
@@ -19,14 +19,19 @@ def init_db():
     with _conn() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS accounts (
-                session_name  TEXT PRIMARY KEY,
-                added_at      TEXT,
-                notes         TEXT DEFAULT '',
-                invalid_count INTEGER DEFAULT 0,
-                last_reauth   TEXT,
-                last_unread   TEXT
+                session_name   TEXT PRIMARY KEY,
+                added_at       TEXT,
+                notes          TEXT DEFAULT '',
+                invalid_count  INTEGER DEFAULT 0,
+                last_reauth    TEXT,
+                last_unread    TEXT,
+                last_converted TEXT
             )
         """)
+        try:
+            conn.execute("ALTER TABLE accounts ADD COLUMN last_converted TEXT")
+        except sqlite3.OperationalError:
+            pass
         existing = {row[0] for row in conn.execute("SELECT session_name FROM accounts")}
 
     for base in (SESSIONS_DIR, ARCHIVE_DIR):
@@ -59,7 +64,7 @@ def add_account(name: str):
 def get_account(name: str) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
-            """SELECT session_name, added_at, notes, invalid_count, last_reauth, last_unread
+            """SELECT session_name, added_at, notes, invalid_count, last_reauth, last_unread, last_converted
                FROM accounts WHERE session_name = ?""",
             (name,),
         ).fetchone()
@@ -72,6 +77,7 @@ def get_account(name: str) -> Optional[dict]:
         "invalid_count": row[3] or 0,
         "last_reauth": row[4],
         "last_unread": row[5],
+        "last_converted": row[6],
     }
 
 
@@ -106,3 +112,27 @@ def mark_unread(name: str):
             "UPDATE accounts SET last_unread = ? WHERE session_name = ?",
             (_now(), name),
         )
+
+
+def mark_converted(name: str):
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE accounts SET last_converted = ? WHERE session_name = ?",
+            (_now(), name),
+        )
+
+
+def get_stale_accounts(days: int) -> list[dict]:
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT session_name, added_at, last_converted
+               FROM accounts
+               WHERE last_converted IS NULL OR last_converted < ?
+               ORDER BY COALESCE(last_converted, added_at) ASC""",
+            (cutoff,),
+        ).fetchall()
+    return [
+        {"session_name": r[0], "added_at": r[1], "last_converted": r[2]}
+        for r in rows
+    ]

@@ -71,6 +71,11 @@ async def do_backup() -> None:
         if os.path.exists(zip_path):
             os.remove(zip_path)
 
+    from handlers.misc import build_stale_report
+    stale_report = build_stale_report()
+    if stale_report:
+        await bot.send_message(OWNER_ID, stale_report, disable_notification=True)
+
 
 async def schedule_backup_after_add() -> None:
     await asyncio.sleep(180)

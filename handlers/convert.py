@@ -6,6 +6,7 @@ from converter import convert_to_tdata
 from config import SESSIONS_DIR, ARCHIVE_DIR
 from logger import get_logger
 from handlers.common import get_session_names, build_pagination, cb_decode
+import store
 
 log = get_logger(__name__)
 
@@ -56,4 +57,5 @@ async def do_convert(message: Message, session_name: str, notify: bool = True):
         return
     await message.reply_document(zip_path, caption=f"tdata for `{clean_name}`")
     os.remove(zip_path)
+    store.mark_converted(clean_name)
     log.info(f"tdata sent and removed: {clean_name}")

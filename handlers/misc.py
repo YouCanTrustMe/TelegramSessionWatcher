@@ -4,7 +4,7 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import bot, owner_filter
-from config import LOGS_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, SCHEDULER_STATE_FILE
+from config import LOGS_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, SCHEDULER_STATE_FILE, STALE_CONVERT_DAYS, DAILY_DIR
 
 
 def _load_batch_state() -> dict:
@@ -144,6 +144,77 @@ async def log_file_callback(client: Client, callback: CallbackQuery):
     await callback.answer()
     now = datetime.now()
     await callback.message.reply_document(log_path, caption=f"📋 Log for `{now.strftime('%Y-%m-%d')}`")
+
+
+def build_stale_report(days: int = STALE_CONVERT_DAYS) -> str | None:
+    import store
+
+    stale = store.get_stale_accounts(days)
+    if not stale:
+        return None
+
+    now = datetime.now()
+    lines = [f"**⏰ Stale tdata** (no convert in {days}+ days) — `{len(stale)}`\n"]
+    for entry in stale:
+        ref = entry["last_converted"] or entry["added_at"]
+        label = "converted" if entry["last_converted"] else "added"
+        try:
+            dt = datetime.fromisoformat(ref)
+            age_days = (now - dt).days
+            lines.append(f"• `{entry['session_name']}` — {label} {age_days}d ago")
+        except (TypeError, ValueError):
+            lines.append(f"• `{entry['session_name']}` — never {label}")
+    return "\n".join(lines)
+
+
+@bot.on_message(filters.command("stale") & owner_filter)
+async def stale_cmd(client: Client, message: Message):
+    report = build_stale_report()
+    if report is None:
+        await message.reply(f"✅ No accounts stale beyond {STALE_CONVERT_DAYS} days.")
+        return
+    await message.reply(report)
+
+
+@bot.on_message(filters.command("today") & owner_filter)
+async def today_cmd(client: Client, message: Message):
+    now = datetime.now()
+    path = os.path.join(DAILY_DIR, f"{now.strftime('%Y-%m-%d')}.jsonl")
+    if not os.path.exists(path):
+        await message.reply("📭 No unread messages logged today.")
+        return
+
+    entries = []
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+
+    if not entries:
+        await message.reply("📭 No unread messages logged today.")
+        return
+
+    total_chats = sum(e.get("chats", 0) for e in entries)
+    header = (
+        f"**📬 Today — {now.strftime('%Y-%m-%d')}**\n"
+        f"`{len(entries)}` account notification(s), `{total_chats}` chat(s)\n"
+    )
+
+    current = header
+    for e in entries:
+        block = f"\n**{e['time']} — `{e['account']}`**\n{e['body']}\n"
+        if len(current) + len(block) > 3800:
+            await message.reply(current)
+            current = block
+        else:
+            current += block
+    if current.strip():
+        await message.reply(current)
 
 
 @bot.on_message(filters.command("note") & owner_filter)

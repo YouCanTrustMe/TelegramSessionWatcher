@@ -8,7 +8,7 @@ from datetime import datetime
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
 from pyrogram.raw.functions.account import UpdateStatus
-from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE
+from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, DAILY_DIR
 from bot import send_notification
 from logger import get_logger
 import store
@@ -82,6 +82,19 @@ def _format_preview(msg) -> str:
     return "[message]"
 
 
+def _append_daily_entry(name: str, chat_count: int, body: str):
+    now = datetime.now()
+    path = os.path.join(DAILY_DIR, f"{now.strftime('%Y-%m-%d')}.jsonl")
+    entry = {
+        "time": now.strftime("%H:%M"),
+        "account": name,
+        "chats": chat_count,
+        "body": body,
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
 def _update_batch_state(hour: int):
     try:
         with open(BATCH_STATE_FILE) as f:
@@ -135,7 +148,9 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
 
         if unread_blocks:
             header = f"📩 Account [{name}] — {len(unread_blocks)} chat(s)"
-            await send_notification(header + "\n\n" + "\n\n".join(unread_blocks))
+            body = "\n\n".join(unread_blocks)
+            await send_notification(header + "\n\n" + body)
+            _append_daily_entry(name, len(unread_blocks), body)
             store.mark_unread(name)
             has_unread = True
 

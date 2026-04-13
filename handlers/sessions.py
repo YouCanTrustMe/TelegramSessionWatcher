@@ -13,14 +13,44 @@ from handlers.common import get_session_names, build_pagination, cb_encode, cb_d
 log = get_logger(__name__)
 
 
+MAX_SEARCH_RESULTS = 50
+
+
 @bot.on_message(filters.command("list") & owner_filter)
 async def list_accounts(client: Client, message: Message):
+    parts = message.text.split(maxsplit=1)
+    if len(parts) >= 2:
+        await _list_search(message, parts[1].strip())
+        return
+
     names = get_session_names()
     if not names:
         await message.reply("No accounts found.")
         return
     text, markup = build_pagination(names, 0, "list")
     await message.reply(text, reply_markup=markup)
+
+
+async def _list_search(message: Message, query: str):
+    q = query.lower()
+    active = get_session_names()
+    archived = get_session_names(include_archived=True)[len(active):]
+
+    hits = [(n, False) for n in active if q in n.lower()]
+    hits += [(n.removeprefix("[archived] "), True) for n in archived if q in n.lower()]
+
+    if not hits:
+        await message.reply(f"No accounts matching `{query}`.")
+        return
+
+    shown = hits[:MAX_SEARCH_RESULTS]
+    lines = [f"**🔎 Matches for** `{query}` — `{len(hits)}`\n"]
+    for name, is_arch in shown:
+        suffix = " _[archived]_" if is_arch else ""
+        lines.append(f"• `{name}`{suffix}")
+    if len(hits) > MAX_SEARCH_RESULTS:
+        lines.append(f"\n_…and {len(hits) - MAX_SEARCH_RESULTS} more. Refine the query._")
+    await message.reply("\n".join(lines))
 
 
 @bot.on_message(filters.command("archive") & owner_filter)
