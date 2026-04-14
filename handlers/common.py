@@ -78,9 +78,9 @@ def build_pagination(names: list, page: int, action: str) -> tuple:
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("« Prev", callback_data=f"page:{action}:{page - 1}"))
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"page:{action}:{page - 1}"))
     if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("Next »", callback_data=f"page:{action}:{page + 1}"))
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"page:{action}:{page + 1}"))
     if nav:
         buttons.append(nav)
 

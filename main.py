@@ -2,13 +2,13 @@ import asyncio
 import os
 import signal
 from datetime import datetime
-from typing import Optional
 from pyrogram import filters
 from pyrogram.types import Message
 from watcher import run_session
 from bot import bot, owner_filter
 from logger import get_logger
-from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR, SCHEDULER_STATE_FILE
+from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR
+from state import read_state, write_state
 from store import init_db
 import handlers
 
@@ -40,47 +40,33 @@ async def exit_cmd(client, message: Message):
     _shutdown = True
 
 
-def _read_state() -> tuple:
-    try:
-        with open(SCHEDULER_STATE_FILE) as f:
-            parts = f.read().strip().split("\n")
-            return parts[0] if len(parts) > 0 else None, parts[1] if len(parts) > 1 else None
-    except FileNotFoundError:
-        return None, None
-
-
-def _write_state(session_key: Optional[str], backup_key: Optional[str]):
-    with open(SCHEDULER_STATE_FILE, "w") as f:
-        f.write(f"{session_key or ''}\n{backup_key or ''}")
-
-
 async def scheduler():
-    last_session_run, last_backup_run = _read_state()
+    last_session_run, last_backup_run = read_state()
 
     while not _shutdown:
         now = datetime.now()
 
         if now.hour in SCHEDULE_HOURS:
-            key = now.strftime("%Y-%m-%d %H")
-            if key != last_session_run:
+            key = now.strftime("%Y-%m-%d %H:%M")
+            if key[:13] != (last_session_run or "")[:13]:
                 log.info(f"Running session at {now.strftime('%H:%M')}")
                 try:
                     await run_session(hour=now.hour)
                 except Exception as e:
                     log.error(f"run_session failed: {e}")
                 last_session_run = key
-                _write_state(last_session_run, last_backup_run)
+                write_state(last_session_run, last_backup_run)
 
         if now.weekday() == BACKUP_DAY and now.hour == BACKUP_HOUR:
-            key = now.strftime("%Y-%m-%d %H")
-            if key != last_backup_run:
+            key = now.strftime("%Y-%m-%d %H:%M")
+            if key[:13] != (last_backup_run or "")[:13]:
                 log.info("Running scheduled backup")
                 try:
                     await handlers.do_backup()
                 except Exception as e:
                     log.error(f"do_backup failed: {e}")
                 last_backup_run = key
-                _write_state(last_session_run, last_backup_run)
+                write_state(last_session_run, last_backup_run)
 
         for _ in range(30):
             if _shutdown:

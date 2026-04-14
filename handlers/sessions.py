@@ -65,9 +65,9 @@ def _build_list_view(tab: str, page: int):
 
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("« Prev", callback_data=f"lt:{tab}:{page - 1}"))
+        nav.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"lt:{tab}:{page - 1}"))
     if page < pages - 1:
-        nav.append(InlineKeyboardButton("Next »", callback_data=f"lt:{tab}:{page + 1}"))
+        nav.append(InlineKeyboardButton("Next ➡️", callback_data=f"lt:{tab}:{page + 1}"))
     if nav:
         rows.append(nav)
 
@@ -116,13 +116,13 @@ async def handle_list_account(client: Client, callback: CallbackQuery):
 
     buttons = []
     if tab == TAB_ACTIVE:
-        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode("info", name)))
+        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", name)))
         buttons.append(InlineKeyboardButton("🗄 Archive", callback_data=cb_encode("remove", name)))
         buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", name)))
         buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode("list_note", name)))
     elif tab == TAB_ARCHIVE:
         arch_name = f"[archived] {name}"
-        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode("info", arch_name)))
+        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", arch_name)))
         buttons.append(InlineKeyboardButton("↩️ Unarchive", callback_data=cb_encode("unarchive", name)))
         buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", arch_name)))
         buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode("list_note", name)))
@@ -252,15 +252,14 @@ async def handle_cancel_remove(client: Client, callback: CallbackQuery):
 
 
 
-async def do_info(message: Message, session_name: str):
+async def do_info(session_name: str) -> str:
     clean_name = session_name.removeprefix("[archived] ")
     is_archived = session_name.startswith("[archived] ")
     base_dir = ARCHIVE_DIR if is_archived else SESSIONS_DIR
     session_path = os.path.join(base_dir, f"{clean_name}.session")
 
     if not os.path.exists(session_path):
-        await message.reply(f"Session `{clean_name}` not found.")
-        return
+        return f"Session `{clean_name}` not found."
 
     size = os.path.getsize(session_path)
     modified = datetime.fromtimestamp(os.path.getmtime(session_path)).strftime("%Y-%m-%d %H:%M")
@@ -309,7 +308,7 @@ async def do_info(message: Message, session_name: str):
         if meta_lines:
             meta_block = "\n" + "\n".join(meta_lines)
 
-    await message.reply(
+    return (
         f"**Account info:**\n"
         f"Name: `{clean_name}`\n"
         f"Full name: `{full_name}`\n"
@@ -385,11 +384,20 @@ async def handle_remove_callback(client: Client, callback: CallbackQuery):
     await callback.answer()
 
 
-@bot.on_callback_query(filters.regex(r'^info:'))
+@bot.on_callback_query(filters.regex(r'^info_[azi]:') & owner_filter)
 async def handle_info_callback(client: Client, callback: CallbackQuery):
-    session_name = cb_decode(callback.data.split(":", 1)[1])
+    prefix, raw = callback.data.split(":", 1)
+    tab = prefix[5:]
+    session_name = cb_decode(raw)
     if session_name is None:
-        await callback.answer("⚠️ Outdated button. Use /info again.", show_alert=True)
+        await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
         return
     await callback.answer()
-    await do_info(callback.message, session_name)
+    text = await do_info(session_name)
+    display_name = session_name.removeprefix("[archived] ")
+    back_data = cb_encode(f"la_{tab}", display_name)
+    markup = InlineKeyboardMarkup([[InlineKeyboardButton("« Back", callback_data=back_data)]])
+    try:
+        await callback.message.edit_text(text, reply_markup=markup)
+    except Exception:
+        await callback.message.reply(text, reply_markup=markup)

@@ -3,7 +3,7 @@ from pyrogram.types import Message
 from bot import bot, owner_filter
 
 KNOWN_COMMANDS = {
-    "add", "backup", "exit", "list", "restore", "status",
+    "add", "backup", "exit", "list", "log", "restore", "status",
 }
 
 

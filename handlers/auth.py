@@ -1,4 +1,5 @@
 import os
+import glob
 import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery
@@ -91,6 +92,15 @@ async def handle_auth_input(client: Client, message: Message):
 
     if state["step"] == "phone":
         phone = message.text.strip()
+        phone_clean = phone.lstrip("+")
+        existing = glob.glob(os.path.join(SESSIONS_DIR, f"{phone_clean}_*.session"))
+        if existing:
+            name = os.path.basename(existing[0]).replace(".session", "")
+            await message.reply(
+                f"⚠️ Account with this number already exists: `{name}`\n\nArchive or delete it first.",
+                reply_markup=CANCEL_MARKUP,
+            )
+            return
         await start_code_request(
             message,
             phone,

@@ -80,6 +80,8 @@ async def do_backup() -> None:
     try:
         await bot.send_document(OWNER_ID, zip_path, caption=caption)
         log.info("Backup created and sent")
+        from state import write_backup_state
+        write_backup_state(datetime.now().strftime("%Y-%m-%d %H:%M"))
     finally:
         if os.path.exists(zip_path):
             os.remove(zip_path)

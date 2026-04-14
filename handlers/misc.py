@@ -4,7 +4,8 @@ from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import bot, owner_filter
-from config import LOGS_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, SCHEDULER_STATE_FILE, STALE_CONVERT_DAYS, DAILY_DIR
+from config import LOGS_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, STALE_CONVERT_DAYS, DAILY_DIR
+from state import read_state
 
 
 def _load_batch_state() -> dict:
@@ -16,15 +17,8 @@ def _load_batch_state() -> dict:
 
 
 def _load_scheduler_state() -> tuple:
-    try:
-        with open(SCHEDULER_STATE_FILE) as f:
-            parts = f.read().strip().split("\n")
-            return (
-                parts[0] if len(parts) > 0 else "",
-                parts[1] if len(parts) > 1 else "",
-            )
-    except FileNotFoundError:
-        return ("", "")
+    s, b = read_state()
+    return (s or "", b or "")
 
 
 @bot.on_message(filters.command("status") & owner_filter)
@@ -60,13 +54,12 @@ async def status_cmd(client: Client, message: Message):
 
     last_backup = scheduler_state[1]
     if last_backup:
-        lines.append(f"💾 Last backup: `{last_backup}`")
+        lines.append(f"\n**💾 Last backup:** `{last_backup}`")
 
     markup = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📬 Today", callback_data="status_today"),
             InlineKeyboardButton("⏰ Stale", callback_data="status_stale"),
-            InlineKeyboardButton("📋 Log", callback_data="status_log"),
             InlineKeyboardButton("▶️ Run", callback_data="status_run"),
         ],
         [InlineKeyboardButton("📋 Batches", callback_data="status_batches")],
@@ -83,8 +76,8 @@ async def status_batches_callback(client: Client, callback: CallbackQuery):
         for hour in SCHEDULE_HOURS
     ]
     rows = [buttons[i:i+5] for i in range(0, len(buttons), 5)]
-    markup = InlineKeyboardMarkup(rows)
-    await callback.message.reply("Which hour to show?", reply_markup=markup)
+    rows.append([InlineKeyboardButton("❌ Close", callback_data="close_msg")])
+    await callback.message.reply("Which hour to show?", reply_markup=InlineKeyboardMarkup(rows))
 
 
 @bot.on_callback_query(filters.regex(r'^status_batch:') & owner_filter)
@@ -96,11 +89,17 @@ async def status_batch_callback(client: Client, callback: CallbackQuery):
     await callback.answer()
 
     if not batch:
-        await callback.message.reply(f"**{hour:02d}:00** — no accounts in this batch.")
+        await callback.message.reply(
+            f"**{hour:02d}:00** — no accounts in this batch.",
+            reply_markup=_CLOSE_MARKUP,
+        )
         return
 
     names = "\n".join(f"• `{name}`" for name, _ in batch)
-    await callback.message.reply(f"**{hour:02d}:00 — {len(batch)} accounts:**\n{names}")
+    await callback.message.reply(
+        f"**{hour:02d}:00 — {len(batch)} accounts:**\n{names}",
+        reply_markup=_CLOSE_MARKUP,
+    )
 
 
 async def start_run(target: Message, hour: int):
@@ -139,8 +138,25 @@ async def status_run_cancel_callback(client: Client, callback: CallbackQuery):
 
 @bot.on_callback_query(filters.regex(r'^status_run_hour:') & owner_filter)
 async def status_run_hour_callback(client: Client, callback: CallbackQuery):
+    from watcher import get_batch_for_hour
     hour = int(callback.data.split(":")[1])
     await callback.answer()
+    batch = get_batch_for_hour(hour)
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Confirm", callback_data=f"run_confirm:{hour}"),
+        InlineKeyboardButton("❌ Cancel", callback_data="close_msg"),
+    ]])
+    await callback.message.edit_text(
+        f"▶️ Run `{hour:02d}:00`? — {len(batch)} account(s)",
+        reply_markup=markup,
+    )
+
+
+@bot.on_callback_query(filters.regex(r'^run_confirm:') & owner_filter)
+async def run_confirm_callback(client: Client, callback: CallbackQuery):
+    hour = int(callback.data.split(":")[1])
+    await callback.answer()
+    await callback.message.delete()
     await start_run(callback.message, hour)
 
 
@@ -166,15 +182,17 @@ async def send_log_tail(target: Message):
         return
 
     header = f"📋 `{now.strftime('%Y-%m-%d')}` — last {min(15, len(lines))} lines:\n\n"
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("📎 Send full file", callback_data="log:file")]])
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("📎 Send full file", callback_data="log:file"),
+        InlineKeyboardButton("❌ Close", callback_data="close_msg"),
+    ]])
     await target.reply(header + f"```\n{tail}\n```", reply_markup=markup)
 
 
 
-@bot.on_callback_query(filters.regex(r'^status_log$') & owner_filter)
-async def status_log_callback(client: Client, callback: CallbackQuery):
-    await callback.answer()
-    await send_log_tail(callback.message)
+@bot.on_message(filters.command("log") & owner_filter)
+async def log_cmd(client: Client, message: Message):
+    await send_log_tail(message)
 
 
 @bot.on_callback_query(filters.regex(r'^log:file$') & owner_filter)
@@ -209,12 +227,15 @@ def build_stale_report(days: int = STALE_CONVERT_DAYS) -> str | None:
     return "\n".join(lines)
 
 
+_CLOSE_MARKUP = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_msg")]])
+
+
 async def send_stale_report(target: Message):
     report = build_stale_report()
     if report is None:
-        await target.reply(f"✅ No accounts stale beyond {STALE_CONVERT_DAYS} days.")
+        await target.reply(f"✅ No accounts stale beyond {STALE_CONVERT_DAYS} days.", reply_markup=_CLOSE_MARKUP)
         return
-    await target.reply(report)
+    await target.reply(report, reply_markup=_CLOSE_MARKUP)
 
 
 
@@ -261,7 +282,7 @@ async def send_today_digest(target: Message):
         else:
             current += block
     if current.strip():
-        await target.reply(current)
+        await target.reply(current, reply_markup=_CLOSE_MARKUP)
 
 
 
@@ -269,5 +290,11 @@ async def send_today_digest(target: Message):
 async def status_today_callback(client: Client, callback: CallbackQuery):
     await callback.answer()
     await send_today_digest(callback.message)
+
+
+@bot.on_callback_query(filters.regex(r'^close_msg$') & owner_filter)
+async def close_msg_callback(client: Client, callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.delete()
 
 
