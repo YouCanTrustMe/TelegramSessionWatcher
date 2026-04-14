@@ -8,7 +8,7 @@ from datetime import datetime
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
 from pyrogram.raw.functions.account import UpdateStatus
-from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, DAILY_DIR
+from config import API_ID, API_HASH, BOT_TOKEN, OWNER_ID, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, DAILY_DIR
 from bot import send_notification
 from logger import get_logger
 import store
@@ -222,8 +222,14 @@ async def run_session(hour: int = None):
                 if any_unread
                 else f"✅ {start_time} — {len(checked)} checked, no new messages"
             )
-            lines = [f"{header}\n"] + [f"{name} — {t}" for name, t in checked]
-            await send_notification("\n".join(lines), silent=True)
+            accounts_block = "\n".join(f"{name} — {t}" for name, t in checked)
+            text = f"{header}\n\n<blockquote expandable>{accounts_block}</blockquote>"
+            await asyncio.to_thread(
+                lambda: __import__("requests").post(
+                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                    json={"chat_id": OWNER_ID, "text": text, "parse_mode": "HTML", "disable_notification": True},
+                )
+            )
 
         if hour is not None:
             _update_batch_state(hour)
