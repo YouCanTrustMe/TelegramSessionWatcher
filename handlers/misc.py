@@ -102,19 +102,20 @@ async def status_batch_callback(client: Client, callback: CallbackQuery):
     )
 
 
-async def start_run(target: Message, hour: int):
+async def start_run(chat_id: int, hour: int):
     from watcher import run_session, _session_lock
+    from bot import bot as _bot
 
     if _session_lock.locked():
-        await target.reply("⏳ Session check already in progress.")
+        await _bot.send_message(chat_id, "⏳ Session check already in progress.")
         return
     if hour not in SCHEDULE_HOURS:
-        await target.reply(f"❌ Hour `{hour}` not in schedule: {SCHEDULE_HOURS}")
+        await _bot.send_message(chat_id, f"❌ Hour `{hour}` not in schedule: {SCHEDULE_HOURS}")
         return
 
-    await target.reply(f"Starting session for hour {hour}...")
+    await _bot.send_message(chat_id, f"Starting session for hour {hour}...")
     await run_session(hour=hour)
-    await target.reply("✅ Session completed.")
+    await _bot.send_message(chat_id, "✅ Session completed.")
 
 
 
@@ -155,9 +156,10 @@ async def status_run_hour_callback(client: Client, callback: CallbackQuery):
 @bot.on_callback_query(filters.regex(r'^run_confirm:') & owner_filter)
 async def run_confirm_callback(client: Client, callback: CallbackQuery):
     hour = int(callback.data.split(":")[1])
+    chat_id = callback.message.chat.id
     await callback.answer()
     await callback.message.delete()
-    await start_run(callback.message, hour)
+    await start_run(chat_id, hour)
 
 
 def _get_log_path() -> str:

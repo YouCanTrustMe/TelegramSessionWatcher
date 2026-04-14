@@ -95,7 +95,14 @@ async def do_backup() -> None:
 async def schedule_backup_after_add() -> None:
     await asyncio.sleep(180)
     log.info("Auto backup triggered after /add")
-    await do_backup()
+    try:
+        await do_backup()
+    except Exception as e:
+        log.error(f"Auto backup after /add failed: {e}")
+        try:
+            await bot.send_message(OWNER_ID, f"❌ Auto backup failed: {e}")
+        except Exception:
+            pass
 
 
 @bot.on_message(filters.command("backup") & owner_filter)

@@ -93,7 +93,7 @@ async def handle_auth_input(client: Client, message: Message):
     if state["step"] == "phone":
         phone = message.text.strip()
         phone_clean = phone.lstrip("+")
-        existing = glob.glob(os.path.join(SESSIONS_DIR, f"{phone_clean}_*.session"))
+        existing = glob.glob(os.path.join(SESSIONS_DIR, f"{phone_clean}*.session"))
         if existing:
             name = os.path.basename(existing[0]).replace(".session", "")
             await message.reply(

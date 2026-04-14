@@ -59,11 +59,11 @@ def pyrogram_to_telethon(pyrogram_path: str, telethon_path: str):
     """)
 
     dc_servers = {
-        1: ("149.154.175.53", 443),
-        2: ("149.154.167.51", 443),
-        3: ("149.154.175.100", 443),
-        4: ("149.154.167.91", 443),
-        5: ("91.108.56.130", 443),
+        1: ("pluto.web.telegram.org", 443),
+        2: ("venus.web.telegram.org", 443),
+        3: ("aurora.web.telegram.org", 443),
+        4: ("vesta.web.telegram.org", 443),
+        5: ("flora.web.telegram.org", 443),
     }
 
     if dc_id not in dc_servers:
@@ -121,13 +121,14 @@ async def convert_to_tdata(session_name: str, source_dir: str = None) -> Optiona
             os.remove(f"{telethon_path}.session")
 
     zip_path = f"{output_path}.zip"
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, dirs, files in os.walk(output_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                arcname = os.path.join("tdata", os.path.relpath(file_path, output_path))
-                zf.write(file_path, arcname)
-
-    shutil.rmtree(output_path)
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(output_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.join("tdata", os.path.relpath(file_path, output_path))
+                    zf.write(file_path, arcname)
+    finally:
+        shutil.rmtree(output_path, ignore_errors=True)
 
     return zip_path
