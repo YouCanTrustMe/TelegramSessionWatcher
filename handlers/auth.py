@@ -8,6 +8,7 @@ from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID
 from logger import get_logger
 from handlers.common import pending_auth, pending_note, CANCEL_MARKUP, set_backup_task
+import store
 
 log = get_logger(__name__)
 
@@ -65,6 +66,7 @@ async def start_code_request(
 async def add_account_cmd(client: Client, message: Message):
     if OWNER_ID in pending_auth:
         await cleanup_pending(OWNER_ID)
+    pending_note.pop(OWNER_ID, None)
     await message.reply("Send phone number (e.g. +380XXXXXXXXX):", reply_markup=CANCEL_MARKUP)
     pending_auth[OWNER_ID] = {"step": "phone"}
 
@@ -140,8 +142,6 @@ async def handle_auth_input(client: Client, message: Message):
 
 async def finish_auth(message: Message, auth_client: Client, state: dict):
     from handlers.backup import schedule_backup_after_add
-    import store
-
     me = await auth_client.get_me()
     first = me.first_name or ""
     last = me.last_name or ""

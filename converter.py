@@ -59,11 +59,11 @@ def pyrogram_to_telethon(pyrogram_path: str, telethon_path: str):
     """)
 
     dc_servers = {
-        1: ("pluto.web.telegram.org", 443),
-        2: ("venus.web.telegram.org", 443),
-        3: ("aurora.web.telegram.org", 443),
-        4: ("vesta.web.telegram.org", 443),
-        5: ("flora.web.telegram.org", 443),
+        1: ("149.154.175.53", 443),
+        2: ("149.154.167.51", 443),
+        3: ("149.154.175.100", 443),
+        4: ("149.154.167.91", 443),
+        5: ("91.108.56.130", 443),
     }
 
     if dc_id not in dc_servers:

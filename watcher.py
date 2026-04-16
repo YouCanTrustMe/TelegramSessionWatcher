@@ -16,14 +16,14 @@ import store
 log = get_logger(__name__)
 _session_lock = asyncio.Lock()
 
-def move_to_invalid(name: str, session_path: str):
+def move_to_invalid(name: str, session_path: str, reason: str = ""):
     dest = os.path.join(INVALID_DIR, f"{name}_invalid")
     for ext in (".session", ".session-journal"):
         src = f"{session_path}{ext}"
         if os.path.exists(src):
             shutil.move(src, f"{dest}{ext}")
-    store.bump_invalid(name)
-    log.info(f"[{name}] Moved to invalid/")
+    store.bump_invalid(name, reason=reason)
+    log.info(f"[{name}] Moved to invalid/ reason={reason!r}")
 
 
 def get_all_sessions() -> list:
@@ -157,13 +157,20 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
     except asyncio.TimeoutError:
         log.error(f"[{name}] get_dialogs timed out after 60s")
         await send_notification(f"⚠️ [{name}] Check timed out — Telegram not responding")
-    except (AuthKeyUnregistered, SessionRevoked):
-        log.error(f"[{name}] Session invalid")
-        move_to_invalid(name, session_path)
+    except (AuthKeyUnregistered, SessionRevoked) as e:
+        if _retry:
+            log.warning(f"[{name}] Session appears invalid, retrying in 60s")
+            await client.disconnect()
+            disconnected = True
+            await asyncio.sleep(60)
+            return await check_account(name, session_path, _retry=False)
+        reason = type(e).__name__
+        log.error(f"[{name}] Session invalid ({reason}), confirmed on retry")
+        move_to_invalid(name, session_path, reason=reason)
         await send_notification(f"🚫 [{name}] Session invalid — moved to invalid. Use /reauth to re-login.")
     except UserDeactivated:
         log.error(f"[{name}] Account deactivated")
-        move_to_invalid(name, session_path)
+        move_to_invalid(name, session_path, reason="UserDeactivated")
         await send_notification(f"❌ [{name}] Account deactivated by Telegram — moved to invalid.")
     except FloodWait as e:
         log.warning(f"[{name}] FloodWait: waiting {e.value}s")
@@ -202,6 +209,7 @@ async def run_session(hour: int = None):
         label = f"hour {hour}" if hour is not None else "all accounts"
         log.info(f"Starting session — {label}: {len(sessions)} accounts")
 
+        start_time = datetime.now().strftime("%H:%M")
         any_unread = False
         checked = []
         for i, (name, path) in enumerate(sessions):
@@ -216,7 +224,6 @@ async def run_session(hour: int = None):
                 await asyncio.sleep(delay)
 
         if checked:
-            start_time = checked[0][1]
             header = (
                 f"✅ {start_time} — {len(checked)} checked, see messages above"
                 if any_unread

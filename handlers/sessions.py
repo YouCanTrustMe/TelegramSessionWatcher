@@ -6,12 +6,14 @@ from pyrogram import Client, filters
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import bot, owner_filter
-from config import API_ID, API_HASH, SESSIONS_DIR, ARCHIVE_DIR
+from config import API_ID, API_HASH, SESSIONS_DIR, ARCHIVE_DIR, OWNER_ID
 from logger import get_logger
 from handlers.common import (
     get_session_names, build_pagination, cb_encode, cb_decode,
     move_session_files, pending_note, PAGE_SIZE, CANCEL_MARKUP,
 )
+from handlers.invalid import get_invalid_names
+import store
 
 log = get_logger(__name__)
 
@@ -27,7 +29,6 @@ _TAB_ICONS = {TAB_ACTIVE: "🟢", TAB_ARCHIVE: "🗄", TAB_INVALID: "⚠️"}
 
 
 def _tab_names(tab: str) -> list:
-    from handlers.invalid import get_invalid_names
     if tab == TAB_ARCHIVE:
         archived = glob.glob(os.path.join(ARCHIVE_DIR, "*.session")) if os.path.isdir(ARCHIVE_DIR) else []
         return sorted([os.path.basename(s).replace(".session", "") for s in archived])
@@ -37,7 +38,6 @@ def _tab_names(tab: str) -> list:
 
 
 def _tab_counts() -> dict:
-    from handlers.invalid import get_invalid_names
     archived = glob.glob(os.path.join(ARCHIVE_DIR, "*.session")) if os.path.isdir(ARCHIVE_DIR) else []
     return {
         TAB_ACTIVE: len(get_session_names()),
@@ -58,6 +58,10 @@ def _build_list_view(tab: str, page: int):
     label = _TAB_LABELS[tab]
     if total == 0:
         text = f"**📒 {icon} {label}** — empty"
+    elif tab == TAB_INVALID:
+        active_count = sum(1 for n in names if not n.endswith("_done"))
+        done_count = total - active_count
+        text = f"**📒 {icon} {label}** — `{active_count}` active · `{done_count}` done · page {page + 1}/{pages}"
     else:
         text = f"**📒 {icon} {label}** — `{total}` · page {page + 1}/{pages}"
 
@@ -119,17 +123,20 @@ async def handle_list_account(client: Client, callback: CallbackQuery):
         buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", name)))
         buttons.append(InlineKeyboardButton("🗄 Archive", callback_data=cb_encode("remove", name)))
         buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", name)))
-        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode("list_note", name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", name)))
     elif tab == TAB_ARCHIVE:
         arch_name = f"[archived] {name}"
         buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", arch_name)))
         buttons.append(InlineKeyboardButton("↩️ Unarchive", callback_data=cb_encode("unarchive", name)))
         buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", arch_name)))
-        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode("list_note", name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", name)))
     elif tab == TAB_INVALID:
         base_name = name.removesuffix("_done").removesuffix("_invalid")
-        buttons.append(InlineKeyboardButton("🔑 Reauth", callback_data=cb_encode("reauth", name)))
-        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode("list_note", base_name)))
+        if name.endswith("_invalid_done"):
+            buttons.append(InlineKeyboardButton("🗑 Delete", callback_data=cb_encode("invalid_delete", name)))
+        else:
+            buttons.append(InlineKeyboardButton("🔑 Reauth", callback_data=cb_encode("reauth", name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", base_name)))
 
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton("« Back to list", callback_data=f"lt:{tab}:0")])
@@ -145,38 +152,54 @@ async def handle_list_account(client: Client, callback: CallbackQuery):
         )
 
 
-@bot.on_callback_query(filters.regex(r'^list_note:') & owner_filter)
+@bot.on_callback_query(filters.regex(r'^list_note_[azi]:') & owner_filter)
 async def handle_list_note(client: Client, callback: CallbackQuery):
-    from config import OWNER_ID
-    name = cb_decode(callback.data.split(":", 1)[1])
+    prefix, raw = callback.data.split(":", 1)
+    tab = prefix.split("_")[-1]
+    name = cb_decode(raw)
     if name is None:
         await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
         return
     await callback.answer()
-    pending_note[OWNER_ID] = {"session": name}
-    await callback.message.reply(
-        f"📝 Send note text for `{name}` (empty message clears the note):",
-        reply_markup=CANCEL_MARKUP,
+    pending_note[OWNER_ID] = {
+        "session": name,
+        "tab": tab,
+        "msg_id": callback.message.id,
+        "chat_id": callback.message.chat.id,
+    }
+    await callback.message.edit_text(
+        f"📝 Enter note for `{name}`:\n_(empty message clears the note)_",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("❌ Cancel", callback_data=f"lt:{tab}:0"),
+        ]]),
     )
 
 
 @bot.on_message(owner_filter & filters.text & ~filters.regex(r'^/'))
 async def handle_note_input(client: Client, message: Message):
-    from config import OWNER_ID
-    import store
     if OWNER_ID not in pending_note:
         return
     state = pending_note.pop(OWNER_ID)
     name = state["session"]
+    tab = state.get("tab", TAB_ACTIVE)
+    msg_id = state.get("msg_id")
+    chat_id = state.get("chat_id")
     if store.get_account(name) is None:
         await message.reply(f"Account `{name}` not found in metadata store.")
         return
     text = message.text.strip()
     store.set_note(name, text)
-    if text:
-        await message.reply(f"📝 Note for `{name}` saved.")
-    else:
-        await message.reply(f"📝 Note for `{name}` cleared.")
+    label = "saved" if text else "cleared"
+    back_markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("« Back to list", callback_data=f"lt:{tab}:0"),
+    ]])
+    if msg_id and chat_id:
+        try:
+            await client.edit_message_text(chat_id, msg_id, f"✅ Note for `{name}` {label}.", reply_markup=back_markup)
+            return
+        except Exception:
+            pass
+    await message.reply(f"📝 Note for `{name}` {label}.")
 
 
 async def _list_search(message: Message, query: str):
@@ -290,7 +313,6 @@ async def do_info(session_name: str) -> str:
         except Exception:
             pass
 
-    import store
     meta = store.get_account(clean_name)
     meta_block = ""
     if meta:
@@ -298,7 +320,8 @@ async def do_info(session_name: str) -> str:
         if meta["added_at"]:
             meta_lines.append(f"Added: `{meta['added_at']}`")
         if meta["invalid_count"]:
-            meta_lines.append(f"Invalid count: `{meta['invalid_count']}`")
+            reason_str = f" ({meta['invalid_reason']})" if meta.get("invalid_reason") else ""
+            meta_lines.append(f"Invalid count: `{meta['invalid_count']}`{reason_str}")
         if meta["last_reauth"]:
             meta_lines.append(f"Last reauth: `{meta['last_reauth']}`")
         if meta["last_unread"]:

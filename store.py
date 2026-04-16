@@ -8,7 +8,9 @@ DB_PATH = os.path.join(DATA_DIR, "accounts.db")
 
 
 def _conn():
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
 
 
 def _now() -> str:
@@ -28,12 +30,14 @@ def init_db():
                 last_converted TEXT
             )
         """)
-        try:
-            conn.execute("ALTER TABLE accounts ADD COLUMN last_converted TEXT")
-        except sqlite3.OperationalError:
-            pass
+        for col in ("last_converted TEXT", "invalid_reason TEXT"):
+            try:
+                conn.execute(f"ALTER TABLE accounts ADD COLUMN {col}")
+            except sqlite3.OperationalError:
+                pass
         existing = {row[0] for row in conn.execute("SELECT session_name FROM accounts")}
 
+    new_rows = []
     for base in (SESSIONS_DIR, ARCHIVE_DIR):
         if not os.path.isdir(base):
             continue
@@ -46,11 +50,14 @@ def init_db():
             mtime = datetime.fromtimestamp(
                 os.path.getmtime(os.path.join(base, f))
             ).isoformat(timespec="seconds")
-            with _conn() as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO accounts (session_name, added_at) VALUES (?, ?)",
-                    (name, mtime),
-                )
+            new_rows.append((name, mtime))
+
+    if new_rows:
+        with _conn() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO accounts (session_name, added_at) VALUES (?, ?)",
+                new_rows,
+            )
 
 
 def add_account(name: str):
@@ -64,7 +71,7 @@ def add_account(name: str):
 def get_account(name: str) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
-            """SELECT session_name, added_at, notes, invalid_count, last_reauth, last_unread, last_converted
+            """SELECT session_name, added_at, notes, invalid_count, last_reauth, last_unread, last_converted, invalid_reason
                FROM accounts WHERE session_name = ?""",
             (name,),
         ).fetchone()
@@ -78,6 +85,7 @@ def get_account(name: str) -> Optional[dict]:
         "last_reauth": row[4],
         "last_unread": row[5],
         "last_converted": row[6],
+        "invalid_reason": row[7],
     }
 
 
@@ -89,11 +97,11 @@ def set_note(name: str, text: str):
         )
 
 
-def bump_invalid(name: str):
+def bump_invalid(name: str, reason: str = ""):
     with _conn() as conn:
         conn.execute(
-            "UPDATE accounts SET invalid_count = invalid_count + 1 WHERE session_name = ?",
-            (name,),
+            "UPDATE accounts SET invalid_count = invalid_count + 1, invalid_reason = ? WHERE session_name = ?",
+            (reason, name),
         )
 
 

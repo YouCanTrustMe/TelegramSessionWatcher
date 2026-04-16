@@ -1,10 +1,10 @@
 import glob
 import os
 from pyrogram import Client, filters
-from pyrogram.types import Message, CallbackQuery
+from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot, owner_filter
 from config import INVALID_DIR, OWNER_ID
-from handlers.common import build_pagination, pending_auth, cb_decode
+from handlers.common import build_pagination, pending_auth, cb_decode, move_session_files
 
 
 def get_invalid_names(include_done: bool = False) -> list:
@@ -16,6 +16,21 @@ def get_invalid_names(include_done: bool = False) -> list:
             names.append(name)
     return sorted(names)
 
+
+
+@bot.on_callback_query(filters.regex(r'^invalid_delete:') & owner_filter)
+async def handle_invalid_delete_callback(client: Client, callback: CallbackQuery):
+    from handlers.common import cb_decode as _cb_decode
+    name = _cb_decode(callback.data.split(":", 1)[1])
+    if name is None:
+        await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
+        return
+    await callback.answer()
+    for ext in (".session", ".session-journal"):
+        path = os.path.join(INVALID_DIR, f"{name}{ext}")
+        if os.path.exists(path):
+            os.remove(path)
+    await callback.message.edit_text(f"🗑 `{name}` deleted.")
 
 
 @bot.on_callback_query(filters.regex(r'^reauth:'))

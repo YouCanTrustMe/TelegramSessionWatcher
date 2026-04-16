@@ -1,16 +1,17 @@
 import asyncio
 import os
 import signal
-from datetime import datetime
+from datetime import datetime, timedelta
 from pyrogram import filters
 from pyrogram.types import Message
 from watcher import run_session
 from bot import bot, owner_filter
 from logger import get_logger
-from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR
+from config import SCHEDULE_HOURS, BACKUP_DAY, BACKUP_HOUR, DAILY_DIR, DAILY_KEEP_DAYS
 from state import read_state, write_state
 from store import init_db
 import handlers
+from handlers.backup import do_backup
 
 log = get_logger(__name__)
 
@@ -62,7 +63,7 @@ async def scheduler():
             if key[:13] != (last_backup_run or "")[:13]:
                 log.info("Running scheduled backup")
                 try:
-                    await handlers.do_backup()
+                    await do_backup()
                 except Exception as e:
                     log.error(f"do_backup failed: {e}")
                 last_backup_run = key
@@ -74,9 +75,27 @@ async def scheduler():
             await asyncio.sleep(1)
 
 
+def _cleanup_daily_logs():
+    cutoff = datetime.now() - timedelta(days=DAILY_KEEP_DAYS)
+    removed = 0
+    for fname in os.listdir(DAILY_DIR):
+        if not fname.endswith(".jsonl"):
+            continue
+        try:
+            dt = datetime.strptime(fname[:10], "%Y-%m-%d")
+        except ValueError:
+            continue
+        if dt < cutoff:
+            os.remove(os.path.join(DAILY_DIR, fname))
+            removed += 1
+    if removed:
+        log.info(f"Removed {removed} old daily log(s) (>{DAILY_KEEP_DAYS} days)")
+
+
 async def main():
     log.info("TelegramSessionWatcher started")
     init_db()
+    _cleanup_daily_logs()
     await bot.start()
     me = await bot.get_me()
     log.info(f"Bot started: @{me.username}")

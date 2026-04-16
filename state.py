@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from config import SCHEDULER_STATE_FILE
 
@@ -15,8 +16,10 @@ def read_state() -> tuple[Optional[str], Optional[str]]:
 
 
 def write_state(session_key: Optional[str], backup_key: Optional[str]):
-    with open(SCHEDULER_STATE_FILE, "w") as f:
+    tmp = SCHEDULER_STATE_FILE + ".tmp"
+    with open(tmp, "w") as f:
         f.write(f"{session_key or ''}\n{backup_key or ''}")
+    os.replace(tmp, SCHEDULER_STATE_FILE)
 
 
 def write_backup_state(backup_key: str):

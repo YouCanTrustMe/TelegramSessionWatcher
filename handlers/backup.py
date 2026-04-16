@@ -5,7 +5,7 @@ import shutil
 from datetime import datetime
 import pyzipper
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot, owner_filter
 from config import OWNER_ID, BACKUP_PASSWORD, DATA_DIR, BASE_DIR
 from logger import get_logger
@@ -13,6 +13,7 @@ from logger import get_logger
 log = get_logger(__name__)
 
 GITIGNORE_PATHS = [DATA_DIR, ".env", "bot.session"]
+_pending_restore: dict = {}
 
 
 def _collect_stats() -> tuple[list, list, int]:
@@ -65,20 +66,22 @@ async def do_backup() -> None:
 
     folder_stats, file_list, total_files = await asyncio.to_thread(_build_zip_sync, zip_path)
 
-    lines = [f"**📦 `tsw_backup_{date_str}.zip`**"]
-    if folder_stats:
-        lines.append("\n📁 **Folders:**")
-        for path, count in folder_stats:
-            lines.append(f"• `{path}/` — `{count}`")
+    lines = [f"**📁 Folders:**"]
+    for path, count in folder_stats:
+        lines.append(f"• `{path}/` — `{count}`")
     if file_list:
-        lines.append("\n📄 **Files:**")
+        lines.append(f"\n**📄 Files:**")
         for path in file_list:
             lines.append(f"• `{path}`")
     lines.append(f"\n🗂 **Total:** `{total_files}` file(s)")
-    caption = "\n".join(lines)
+    details = "\n".join(lines)
 
     try:
-        await bot.send_document(OWNER_ID, zip_path, caption=caption)
+        sent = await bot.send_document(
+            OWNER_ID, zip_path,
+            caption=f"**📦 `tsw_backup_{date_str}.zip`**",
+        )
+        await sent.reply(details, disable_notification=True)
         log.info("Backup created and sent")
         from state import write_backup_state
         write_backup_state(datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -89,7 +92,8 @@ async def do_backup() -> None:
     from handlers.misc import build_stale_report
     stale_report = build_stale_report()
     if stale_report:
-        await bot.send_message(OWNER_ID, stale_report, disable_notification=True)
+        markup = InlineKeyboardMarkup([[InlineKeyboardButton("✅ OK", callback_data="close_msg")]])
+        await bot.send_message(OWNER_ID, stale_report, disable_notification=True, reply_markup=markup)
 
 
 async def schedule_backup_after_add() -> None:
@@ -120,13 +124,52 @@ async def restore_cmd(client: Client, message: Message):
         await message.reply("Reply to a backup zip file with /restore")
         return
 
-    await message.reply("Restoring backup...")
+    doc = message.reply_to_message.document
+    _pending_restore[OWNER_ID] = message.reply_to_message.id
+
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Confirm", callback_data=f"restore_confirm:{message.reply_to_message.id}"),
+        InlineKeyboardButton("❌ Cancel", callback_data="restore_cancel"),
+    ]])
+    await message.reply(
+        f"⚠️ Restore `{doc.file_name or 'backup.zip'}`?\n"
+        f"This will overwrite `data/` and `bot.session`. `.env` will NOT be restored.",
+        reply_markup=markup,
+    )
+
+
+@bot.on_callback_query(filters.regex(r'^restore_cancel$') & owner_filter)
+async def restore_cancel_callback(client: Client, callback: CallbackQuery):
+    _pending_restore.pop(OWNER_ID, None)
+    await callback.message.edit_text("❌ Restore cancelled.")
+    await callback.answer()
+
+
+@bot.on_callback_query(filters.regex(r'^restore_confirm:') & owner_filter)
+async def restore_confirm_callback(client: Client, callback: CallbackQuery):
+    msg_id = int(callback.data.split(":", 1)[1])
+    if _pending_restore.get(OWNER_ID) != msg_id:
+        await callback.answer("⚠️ Outdated confirmation.", show_alert=True)
+        return
+    _pending_restore.pop(OWNER_ID, None)
+    await callback.answer()
+    await callback.message.edit_text("Restoring backup...")
+    await _do_restore(callback.message, msg_id)
+
+
+async def _do_restore(status_message: Message, source_msg_id: int):
+    chat = status_message.chat
+    try:
+        source_msg = await bot.get_messages(chat.id, source_msg_id)
+    except Exception as e:
+        await status_message.edit_text(f"❌ Could not retrieve file: {e}")
+        return
 
     zip_path = os.path.join(tempfile.gettempdir(), "tsw_restore.zip")
     try:
-        await message.reply_to_message.download(zip_path)
+        await source_msg.download(zip_path)
     except Exception as e:
-        await message.reply(f"❌ Failed to download file: {e}")
+        await status_message.edit_text(f"❌ Failed to download file: {e}")
         return
 
     tmp_dir = os.path.join(tempfile.gettempdir(), "tsw_restore_tmp")
@@ -135,7 +178,7 @@ async def restore_cmd(client: Client, message: Message):
     os.makedirs(tmp_dir)
 
     if not BACKUP_PASSWORD:
-        await message.reply("❌ BACKUP_PASSWORD is not set in .env")
+        await status_message.edit_text("❌ BACKUP_PASSWORD is not set in .env")
         if os.path.exists(zip_path):
             os.remove(zip_path)
         return
@@ -150,6 +193,8 @@ async def restore_cmd(client: Client, message: Message):
 
         rollback = {}
         for item in os.listdir(tmp_dir):
+            if item == ".env":
+                continue
             dst = os.path.join(BASE_DIR, item)
             if os.path.exists(dst):
                 backup_copy = f"{dst}_rollback"
@@ -161,6 +206,8 @@ async def restore_cmd(client: Client, message: Message):
 
         try:
             for item in os.listdir(tmp_dir):
+                if item == ".env":
+                    continue
                 src = os.path.join(tmp_dir, item)
                 dst = os.path.join(BASE_DIR, item)
                 if os.path.isdir(src):
@@ -185,10 +232,10 @@ async def restore_cmd(client: Client, message: Message):
             elif os.path.exists(backup_copy):
                 os.remove(backup_copy)
 
-        await message.reply("✅ Backup restored.")
+        await status_message.edit_text("✅ Backup restored. (.env was not changed)")
         log.info("Backup restored")
     except Exception as e:
-        await message.reply(f"❌ Restore failed: {e}")
+        await status_message.edit_text(f"❌ Restore failed: {e}")
         log.error(f"Restore failed: {e}")
     finally:
         if os.path.exists(zip_path):

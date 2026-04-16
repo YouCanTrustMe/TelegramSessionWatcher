@@ -1,5 +1,6 @@
 import os
 import glob
+import hashlib
 from typing import Optional
 import asyncio
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -19,16 +20,13 @@ def set_backup_task(task: asyncio.Task):
     _backup_task = task
 
 _cb_map: dict[str, str] = {}
-_cb_seq: int = 0
 
 
 def cb_encode(action: str, name: str) -> str:
     full = f"{action}:{name}"
     if len(full.encode("utf-8")) <= 64:
         return full
-    global _cb_seq
-    _cb_seq += 1
-    key = str(_cb_seq)
+    key = hashlib.sha1(name.encode()).hexdigest()[:12]
     _cb_map[key] = name
     return f"{action}:#{key}"
 

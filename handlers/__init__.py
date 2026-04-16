@@ -6,7 +6,3 @@ from handlers import convert
 from handlers import misc
 from handlers import invalid
 from handlers import unknown
-
-from handlers.backup import do_backup
-
-__all__ = ["do_backup"]

@@ -6,6 +6,9 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, 
 from bot import bot, owner_filter
 from config import LOGS_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, STALE_CONVERT_DAYS, DAILY_DIR
 from state import read_state
+from watcher import get_batch_for_hour, run_session, _session_lock
+from handlers.invalid import get_invalid_names
+import store
 
 
 def _load_batch_state() -> dict:
@@ -23,9 +26,6 @@ def _load_scheduler_state() -> tuple:
 
 @bot.on_message(filters.command("status") & owner_filter)
 async def status_cmd(client: Client, message: Message):
-    from watcher import get_batch_for_hour, _session_lock
-    from handlers.invalid import get_invalid_names
-
     batch_state = _load_batch_state()
     scheduler_state = _load_scheduler_state()
     today = datetime.now().strftime("%Y-%m-%d")
@@ -54,7 +54,7 @@ async def status_cmd(client: Client, message: Message):
 
     last_backup = scheduler_state[1]
     if last_backup:
-        lines.append(f"\n**💾 Last backup:** `{last_backup}`")
+        lines.append(f"\n**💾 Last backup: {last_backup}**")
 
     markup = InlineKeyboardMarkup([
         [
@@ -82,8 +82,6 @@ async def status_batches_callback(client: Client, callback: CallbackQuery):
 
 @bot.on_callback_query(filters.regex(r'^status_batch:') & owner_filter)
 async def status_batch_callback(client: Client, callback: CallbackQuery):
-    from watcher import get_batch_for_hour
-
     hour = int(callback.data.split(":")[1])
     batch = get_batch_for_hour(hour)
     await callback.answer()
@@ -103,19 +101,16 @@ async def status_batch_callback(client: Client, callback: CallbackQuery):
 
 
 async def start_run(chat_id: int, hour: int):
-    from watcher import run_session, _session_lock
-    from bot import bot as _bot
-
     if _session_lock.locked():
-        await _bot.send_message(chat_id, "⏳ Session check already in progress.")
+        await bot.send_message(chat_id, "⏳ Session check already in progress.")
         return
     if hour not in SCHEDULE_HOURS:
-        await _bot.send_message(chat_id, f"❌ Hour `{hour}` not in schedule: {SCHEDULE_HOURS}")
+        await bot.send_message(chat_id, f"❌ Hour `{hour}` not in schedule: {SCHEDULE_HOURS}")
         return
 
-    await _bot.send_message(chat_id, f"Starting session for hour {hour}...")
+    await bot.send_message(chat_id, f"Starting session for hour {hour}...")
     await run_session(hour=hour)
-    await _bot.send_message(chat_id, "✅ Session completed.")
+    await bot.send_message(chat_id, "✅ Session completed.")
 
 
 
@@ -139,7 +134,6 @@ async def status_run_cancel_callback(client: Client, callback: CallbackQuery):
 
 @bot.on_callback_query(filters.regex(r'^status_run_hour:') & owner_filter)
 async def status_run_hour_callback(client: Client, callback: CallbackQuery):
-    from watcher import get_batch_for_hour
     hour = int(callback.data.split(":")[1])
     await callback.answer()
     batch = get_batch_for_hour(hour)
@@ -209,8 +203,6 @@ async def log_file_callback(client: Client, callback: CallbackQuery):
 
 
 def build_stale_report(days: int = STALE_CONVERT_DAYS) -> str | None:
-    import store
-
     stale = store.get_stale_accounts(days)
     if not stale:
         return None
