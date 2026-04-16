@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import random
+import requests
 from datetime import datetime
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
@@ -232,7 +233,7 @@ async def run_session(hour: int = None):
             accounts_block = "\n".join(f"{name} — {t}" for name, t in checked)
             text = f"{header}\n\n<blockquote expandable>{accounts_block}</blockquote>"
             await asyncio.to_thread(
-                lambda: __import__("requests").post(
+                lambda: requests.post(
                     f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
                     json={"chat_id": OWNER_ID, "text": text, "parse_mode": "HTML", "disable_notification": True},
                 )

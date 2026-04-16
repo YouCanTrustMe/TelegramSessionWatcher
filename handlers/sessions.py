@@ -383,10 +383,8 @@ async def handle_pagination(client: Client, callback: CallbackQuery):
         archived = glob.glob(os.path.join(ARCHIVE_DIR, "*.session")) if os.path.isdir(ARCHIVE_DIR) else []
         names = sorted([os.path.basename(s).replace(".session", "") for s in archived])
     elif action == "reauth":
-        from handlers.invalid import get_invalid_names
         names = get_invalid_names()
     elif action == "invalid":
-        from handlers.invalid import get_invalid_names
         names = get_invalid_names(include_done=True)
     else:
         include_archived = action in ("info", "convert")

@@ -20,8 +20,7 @@ def get_invalid_names(include_done: bool = False) -> list:
 
 @bot.on_callback_query(filters.regex(r'^invalid_delete:') & owner_filter)
 async def handle_invalid_delete_callback(client: Client, callback: CallbackQuery):
-    from handlers.common import cb_decode as _cb_decode
-    name = _cb_decode(callback.data.split(":", 1)[1])
+    name = cb_decode(callback.data.split(":", 1)[1])
     if name is None:
         await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
         return
