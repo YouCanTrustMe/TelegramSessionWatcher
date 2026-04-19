@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import json
 import os
 import shutil
@@ -42,8 +41,10 @@ def get_batch_for_hour(hour: int) -> list:
     if hour not in SCHEDULE_HOURS or not SCHEDULE_HOURS:
         return all_sessions
     idx = SCHEDULE_HOURS.index(hour)
-    return [(name, path) for name, path in all_sessions
-            if int(hashlib.md5(name.encode()).hexdigest(), 16) % len(SCHEDULE_HOURS) == idx]
+    n = len(SCHEDULE_HOURS)
+    day_offset = datetime.now().timetuple().tm_yday
+    sorted_sessions = sorted(all_sessions, key=lambda x: x[0])
+    return [s for i, s in enumerate(sorted_sessions) if (i + day_offset) % n == idx]
 
 
 def _random_delay() -> float:
@@ -120,10 +121,13 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
         return False
 
     try:
+        try:
+            await client.invoke(UpdateStatus(offline=False))
+        except Exception:
+            pass
+
         me = await client.get_me()
         log.info(f"[{name}] Account alive: {me.first_name}")
-
-        await client.invoke(UpdateStatus(offline=False))
 
         async def _collect_dialogs():
             result = []
@@ -142,7 +146,8 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
                 log.info(f"[{name}] Unread from: {chat_name}")
                 preview = _format_preview(dialog.top_message)
                 extra = dialog.unread_messages_count - 1
-                block = f"From: {chat_name}\n{preview}"
+                ts = dialog.top_message.date.strftime("%d.%m %H:%M") if dialog.top_message and dialog.top_message.date else ""
+                block = f"From: {chat_name}" + (f" `[{ts}]`" if ts else "") + f"\n{preview}"
                 if extra > 0:
                     block += f"\n**__↪ + {extra} more unread__**"
                 unread_blocks.append(block)

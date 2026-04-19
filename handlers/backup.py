@@ -1,5 +1,6 @@
 import os
 import asyncio
+import json
 import tempfile
 import shutil
 from datetime import datetime
@@ -7,12 +8,45 @@ import pyzipper
 from pyrogram import Client, filters
 from pyrogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot, owner_filter
-from config import OWNER_ID, BACKUP_PASSWORD, DATA_DIR, BASE_DIR
+from config import OWNER_ID, BACKUP_PASSWORD, DATA_DIR, BASE_DIR, SESSIONS_DIR, ARCHIVE_DIR, INVALID_DIR, BACKUP_COUNTS_FILE
 from logger import get_logger
 
 log = get_logger(__name__)
 
 GITIGNORE_PATHS = [DATA_DIR, ".env", "bot.session"]
+
+
+def _count_sessions() -> dict:
+    def _c(d):
+        if not os.path.isdir(d):
+            return 0
+        return sum(1 for f in os.listdir(d) if f.endswith(".session"))
+    return {
+        "sessions": _c(SESSIONS_DIR),
+        "archive": _c(ARCHIVE_DIR),
+        "invalid": _c(INVALID_DIR),
+    }
+
+
+def _load_prev_counts() -> dict | None:
+    try:
+        with open(BACKUP_COUNTS_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def _save_counts(counts: dict):
+    with open(BACKUP_COUNTS_FILE, "w") as f:
+        json.dump(counts, f)
+
+
+def _fmt_diff(label: str, cur: int, prev: int | None) -> str:
+    if prev is None:
+        return f"• {label}: `{cur}`"
+    d = cur - prev
+    change = f" (`+{d}`)" if d > 0 else (f" (`{d}`)" if d < 0 else " `=`")
+    return f"• {label}: `{cur}`{change}"
 _pending_restore: dict = {}
 
 
@@ -64,6 +98,9 @@ async def do_backup() -> None:
     date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
     zip_path = os.path.join(tempfile.gettempdir(), f"tsw_backup_{date_str}.zip")
 
+    prev_counts = _load_prev_counts()
+    curr_counts = _count_sessions()
+
     folder_stats, file_list, total_files = await asyncio.to_thread(_build_zip_sync, zip_path)
 
     lines = [f"**📁 Folders:**"]
@@ -74,6 +111,12 @@ async def do_backup() -> None:
         for path in file_list:
             lines.append(f"• `{path}`")
     lines.append(f"\n🗂 **Total:** `{total_files}` file(s)")
+
+    lines.append(f"\n**📊 Sessions vs last backup:**")
+    lines.append(_fmt_diff("Active", curr_counts["sessions"], prev_counts.get("sessions") if prev_counts else None))
+    lines.append(_fmt_diff("Archive", curr_counts["archive"], prev_counts.get("archive") if prev_counts else None))
+    lines.append(_fmt_diff("Invalid", curr_counts["invalid"], prev_counts.get("invalid") if prev_counts else None))
+
     details = "\n".join(lines)
 
     try:
@@ -83,6 +126,7 @@ async def do_backup() -> None:
         )
         await sent.reply(details, disable_notification=True)
         log.info("Backup created and sent")
+        _save_counts(curr_counts)
         from state import write_backup_state
         write_backup_state(datetime.now().strftime("%Y-%m-%d %H:%M"))
     finally:

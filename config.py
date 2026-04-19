@@ -43,6 +43,7 @@ DAILY_DIR = os.path.join(DATA_DIR, "daily")
 
 SCHEDULER_STATE_FILE = os.path.join(DATA_DIR, "scheduler_state.txt")
 BATCH_STATE_FILE = os.path.join(DATA_DIR, "batch_state.json")
+BACKUP_COUNTS_FILE = os.path.join(DATA_DIR, "backup_counts.json")
 
 for _d in (SESSIONS_DIR, ARCHIVE_DIR, INVALID_DIR, LOGS_DIR, TDATA_DIR, TEMP_DIR, DAILY_DIR):
     os.makedirs(_d, exist_ok=True)
