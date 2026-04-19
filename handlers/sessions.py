@@ -65,7 +65,11 @@ def _build_list_view(tab: str, page: int):
     else:
         text = f"**📒 {icon} {label}** — `{total}` · page {page + 1}/{pages}"
 
-    rows = [[InlineKeyboardButton(n, callback_data=cb_encode(f"la_{tab}", n))] for n in chunk]
+    def _btn_label(name: str) -> str:
+        meta = store.get_account(name)
+        return f"📝 {name}" if meta and meta.get("notes") else name
+
+    rows = [[InlineKeyboardButton(_btn_label(n), callback_data=cb_encode(f"la_{tab}", n))] for n in chunk]
 
     nav = []
     if page > 0:
