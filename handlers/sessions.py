@@ -67,7 +67,14 @@ def _build_list_view(tab: str, page: int):
 
     def _btn_label(name: str) -> str:
         meta = store.get_account(name)
-        return f"📝 {name}" if meta and meta.get("notes") else name
+        if not meta:
+            return name
+        icons = ""
+        if meta.get("notes"):
+            icons += "📝"
+        if meta.get("last_converted"):
+            icons += "♻️"
+        return f"{icons} {name}" if icons else name
 
     rows = [[InlineKeyboardButton(_btn_label(n), callback_data=cb_encode(f"la_{tab}", n))] for n in chunk]
 
@@ -112,6 +119,34 @@ async def handle_list_tab(client: Client, callback: CallbackQuery):
     await callback.answer()
 
 
+def _build_account_buttons(tab: str, name: str) -> list:
+    meta = store.get_account(name)
+    is_converted = bool(meta and meta.get("last_converted"))
+    conv_label = "✖️ Unmark ♻️" if is_converted else "♻️ Mark converted"
+    buttons = []
+    if tab == TAB_ACTIVE:
+        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", name)))
+        buttons.append(InlineKeyboardButton("🗄 Archive", callback_data=cb_encode("remove", name)))
+        buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", name)))
+        buttons.append(InlineKeyboardButton(conv_label, callback_data=cb_encode(f"toggle_conv_{tab}", name)))
+    elif tab == TAB_ARCHIVE:
+        arch_name = f"[archived] {name}"
+        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", arch_name)))
+        buttons.append(InlineKeyboardButton("↩️ Unarchive", callback_data=cb_encode("unarchive", name)))
+        buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", arch_name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", name)))
+        buttons.append(InlineKeyboardButton(conv_label, callback_data=cb_encode(f"toggle_conv_{tab}", name)))
+    elif tab == TAB_INVALID:
+        base_name = name.removesuffix("_done").removesuffix("_invalid")
+        if name.endswith("_invalid_done"):
+            buttons.append(InlineKeyboardButton("🗑 Delete", callback_data=cb_encode("invalid_delete", name)))
+        else:
+            buttons.append(InlineKeyboardButton("🔑 Reauth", callback_data=cb_encode("reauth", name)))
+        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", base_name)))
+    return buttons
+
+
 @bot.on_callback_query(filters.regex(r'^la_') & owner_filter)
 async def handle_list_account(client: Client, callback: CallbackQuery):
     prefix, raw = callback.data.split(":", 1)
@@ -122,26 +157,7 @@ async def handle_list_account(client: Client, callback: CallbackQuery):
         return
     await callback.answer()
 
-    buttons = []
-    if tab == TAB_ACTIVE:
-        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", name)))
-        buttons.append(InlineKeyboardButton("🗄 Archive", callback_data=cb_encode("remove", name)))
-        buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", name)))
-        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", name)))
-    elif tab == TAB_ARCHIVE:
-        arch_name = f"[archived] {name}"
-        buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", arch_name)))
-        buttons.append(InlineKeyboardButton("↩️ Unarchive", callback_data=cb_encode("unarchive", name)))
-        buttons.append(InlineKeyboardButton("↻ Convert", callback_data=cb_encode("convert", arch_name)))
-        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", name)))
-    elif tab == TAB_INVALID:
-        base_name = name.removesuffix("_done").removesuffix("_invalid")
-        if name.endswith("_invalid_done"):
-            buttons.append(InlineKeyboardButton("🗑 Delete", callback_data=cb_encode("invalid_delete", name)))
-        else:
-            buttons.append(InlineKeyboardButton("🔑 Reauth", callback_data=cb_encode("reauth", name)))
-        buttons.append(InlineKeyboardButton("📝 Note", callback_data=cb_encode(f"list_note_{tab}", base_name)))
-
+    buttons = _build_account_buttons(tab, name)
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton("« Back to list", callback_data=f"lt:{tab}:0")])
     try:
@@ -317,19 +333,24 @@ async def do_info(session_name: str) -> str:
         except Exception:
             pass
 
+    def _fmt_dt(val: str) -> str:
+        return val.replace("T", " ") if val else ""
+
     meta = store.get_account(clean_name)
     meta_block = ""
     if meta:
         meta_lines = []
         if meta["added_at"]:
-            meta_lines.append(f"Added: `{meta['added_at']}`")
+            meta_lines.append(f"Added: `{_fmt_dt(meta['added_at'])}`")
         if meta["invalid_count"]:
             reason_str = f" ({meta['invalid_reason']})" if meta.get("invalid_reason") else ""
             meta_lines.append(f"Invalid count: `{meta['invalid_count']}`{reason_str}")
         if meta["last_reauth"]:
-            meta_lines.append(f"Last reauth: `{meta['last_reauth']}`")
+            meta_lines.append(f"Last reauth: `{_fmt_dt(meta['last_reauth'])}`")
         if meta["last_unread"]:
-            meta_lines.append(f"Last unread: `{meta['last_unread']}`")
+            meta_lines.append(f"Last unread: `{_fmt_dt(meta['last_unread'])}`")
+        if meta.get("last_converted"):
+            meta_lines.append(f"Converted: `{_fmt_dt(meta['last_converted'])}`")
         if meta["notes"]:
             meta_lines.append(f"Notes: {meta['notes']}")
         if meta_lines:
@@ -426,3 +447,30 @@ async def handle_info_callback(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=markup)
     except Exception:
         await callback.message.reply(text, reply_markup=markup)
+
+
+@bot.on_callback_query(filters.regex(r'^toggle_conv_[az]:') & owner_filter)
+async def handle_toggle_converted(client: Client, callback: CallbackQuery):
+    prefix, raw = callback.data.split(":", 1)
+    tab = prefix[-1]
+    name = cb_decode(raw)
+    if name is None:
+        await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
+        return
+    meta = store.get_account(name)
+    if meta is None:
+        await callback.answer("Account not found.", show_alert=True)
+        return
+    if meta.get("last_converted"):
+        store.clear_converted(name)
+        await callback.answer("♻️ Conversion mark removed.")
+    else:
+        store.mark_converted(name)
+        await callback.answer("♻️ Marked as converted.")
+    buttons = _build_account_buttons(tab, name)
+    rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton("« Back to list", callback_data=f"lt:{tab}:0")])
+    try:
+        await callback.message.edit_reply_markup(InlineKeyboardMarkup(rows))
+    except Exception:
+        pass

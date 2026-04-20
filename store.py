@@ -130,6 +130,14 @@ def mark_converted(name: str):
         )
 
 
+def clear_converted(name: str):
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE accounts SET last_converted = NULL WHERE session_name = ?",
+            (name,),
+        )
+
+
 def get_stale_accounts(days: int) -> list[dict]:
     cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
     with _conn() as conn:
