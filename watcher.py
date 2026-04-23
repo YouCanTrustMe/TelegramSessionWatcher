@@ -8,6 +8,9 @@ from datetime import datetime
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
 from pyrogram.raw.functions.account import UpdateStatus
+from pyrogram.raw.functions.updates import GetState
+from pyrogram.raw.functions.contacts import GetStatuses, GetContacts
+from pyrogram.raw.functions.messages import GetPinnedDialogs
 from config import API_ID, API_HASH, BOT_TOKEN, OWNER_ID, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, DAILY_DIR
 from bot import send_notification
 from logger import get_logger
@@ -123,6 +126,11 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
     try:
         try:
             await client.invoke(UpdateStatus(offline=False))
+            await asyncio.sleep(5)
+            await client.invoke(GetState())
+            await client.invoke(GetStatuses())
+            await client.invoke(GetContacts(hash=0))
+            await client.invoke(GetPinnedDialogs(folder_id=0))
         except Exception:
             pass
 

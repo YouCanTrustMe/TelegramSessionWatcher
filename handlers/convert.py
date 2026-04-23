@@ -1,26 +1,13 @@
 import os
-from pyrogram import Client, filters
-from pyrogram.types import Message, CallbackQuery
-from bot import bot, owner_filter
+from pyrogram.types import Message
 from converter import convert_to_tdata
 from config import SESSIONS_DIR, ARCHIVE_DIR
 from logger import get_logger
-from handlers.common import get_session_names, build_pagination, cb_decode
 import store
 
 log = get_logger(__name__)
 
 
-
-@bot.on_callback_query(filters.regex(r'^convert:'))
-async def handle_convert_callback(client: Client, callback: CallbackQuery):
-    session_name = cb_decode(callback.data.split(":", 1)[1])
-    if session_name is None:
-        await callback.answer("⚠️ Outdated button. Use /convert again.", show_alert=True)
-        return
-    await callback.message.edit_text(f"Converting `{session_name}`...")
-    await callback.answer()
-    await do_convert(callback.message, session_name, notify=False)
 
 
 async def do_convert(message: Message, session_name: str, notify: bool = True):

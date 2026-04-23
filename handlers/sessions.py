@@ -7,6 +7,7 @@ from pyrogram.errors import AuthKeyUnregistered, UserDeactivated
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, ARCHIVE_DIR, OWNER_ID
+from converter import convert_to_tdata
 from logger import get_logger
 from handlers.common import (
     get_session_names, build_pagination, cb_encode, cb_decode,
@@ -284,7 +285,10 @@ async def handle_confirm_remove(client: Client, callback: CallbackQuery):
         os.path.join(ARCHIVE_DIR, dst_name),
     )
     log.info(f"Account archived: {dst_name}")
-    await callback.message.edit_text(f"📦 Account `{dst_name}` moved to archive.")
+    await callback.message.edit_text(
+        f"📦 Account `{dst_name}` moved to archive.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to list", callback_data="lt:a:0")]]),
+    )
     await callback.answer()
 
 
@@ -378,7 +382,22 @@ async def handle_unarchive_callback(client: Client, callback: CallbackQuery):
         await callback.answer("⚠️ Outdated button. Use /unarchive again.", show_alert=True)
         return
     await callback.answer()
-    await do_unarchive(callback.message, session_name)
+    if not os.path.exists(os.path.join(ARCHIVE_DIR, f"{session_name}.session")):
+        await callback.message.edit_text(f"Session `{session_name}` not found in archive.")
+        return
+    restored_name = session_name
+    if os.path.exists(os.path.join(SESSIONS_DIR, f"{restored_name}.session")):
+        restored_name = f"{session_name}_{int(time.time())}"
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    move_session_files(
+        os.path.join(ARCHIVE_DIR, session_name),
+        os.path.join(SESSIONS_DIR, restored_name),
+    )
+    log.info(f"Session unarchived: {restored_name}")
+    await callback.message.edit_text(
+        f"✅ Session `{restored_name}` moved back to active.",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("« Back to list", callback_data="lt:a:0")]]),
+    )
 
 
 async def do_unarchive(message: Message, session_name: str):
@@ -426,8 +445,15 @@ async def handle_remove_callback(client: Client, callback: CallbackQuery):
     if session_name is None:
         await callback.answer("⚠️ Outdated button. Use /archive again.", show_alert=True)
         return
-    await ask_remove_confirm(callback.message, session_name)
     await callback.answer()
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Yes, archive", callback_data=cb_encode("confirm_remove", session_name)),
+        InlineKeyboardButton("❌ Cancel", callback_data=cb_encode("la_a", session_name)),
+    ]])
+    await callback.message.edit_text(
+        f"⚠️ Archive `{session_name}`?\n_Session will be moved to archive, not deleted._",
+        reply_markup=markup,
+    )
 
 
 @bot.on_callback_query(filters.regex(r'^info_[azi]:') & owner_filter)
@@ -447,6 +473,44 @@ async def handle_info_callback(client: Client, callback: CallbackQuery):
         await callback.message.edit_text(text, reply_markup=markup)
     except Exception:
         await callback.message.reply(text, reply_markup=markup)
+
+
+@bot.on_callback_query(filters.regex(r'^convert:') & owner_filter)
+async def handle_convert_callback(client: Client, callback: CallbackQuery):
+    session_name = cb_decode(callback.data.split(":", 1)[1])
+    if session_name is None:
+        await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
+        return
+    clean_name = session_name.removeprefix("[archived] ")
+    is_archived = session_name.startswith("[archived] ")
+    tab = TAB_ARCHIVE if is_archived else TAB_ACTIVE
+    source_dir = ARCHIVE_DIR if is_archived else SESSIONS_DIR
+
+    await callback.message.edit_text(f"⏳ Converting `{clean_name}`...")
+    await callback.answer()
+
+    def _menu():
+        btns = _build_account_buttons(tab, clean_name)
+        rows = [btns[i:i+2] for i in range(0, len(btns), 2)]
+        rows.append([InlineKeyboardButton("« Back to list", callback_data=f"lt:{tab}:0")])
+        return InlineKeyboardMarkup(rows)
+
+    try:
+        zip_path = await convert_to_tdata(clean_name, source_dir=source_dir)
+    except Exception as e:
+        log.error(f"Conversion failed for {clean_name}: {e}")
+        await callback.message.edit_text(f"❌ Failed to convert `{clean_name}`: {e}", reply_markup=_menu())
+        return
+
+    if zip_path is None:
+        await callback.message.edit_text(f"Session `{clean_name}` not found.", reply_markup=_menu())
+        return
+
+    await callback.message.reply_document(zip_path, caption=f"tdata for `{clean_name}`")
+    os.remove(zip_path)
+    store.mark_converted(clean_name)
+    log.info(f"tdata sent and removed: {clean_name}")
+    await callback.message.edit_text(f"**`{clean_name}`**\nSelect action:", reply_markup=_menu())
 
 
 @bot.on_callback_query(filters.regex(r'^toggle_conv_[az]:') & owner_filter)
