@@ -56,6 +56,13 @@ def _random_delay() -> float:
     return random.uniform(3.0, 8.0)
 
 
+def _format_account_header(name: str) -> str:
+    if "_" in name:
+        phone, display = name.split("_", 1)
+        return f"📩 {display} (+{phone})"
+    return f"📩 +{name}"
+
+
 def _format_preview(msg) -> str:
     if msg is None:
         return "[no preview]"
@@ -155,13 +162,14 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
                 preview = _format_preview(dialog.top_message)
                 extra = dialog.unread_messages_count - 1
                 ts = dialog.top_message.date.strftime("%d.%m %H:%M") if dialog.top_message and dialog.top_message.date else ""
-                block = f"From: {chat_name}" + (f" `[{ts}]`" if ts else "") + f"\n{preview}"
+                line1 = f"{chat_name}, {ts}" if ts else chat_name
+                block = f"{line1}\n\"{preview}\""
                 if extra > 0:
-                    block += f"\n**__↪ + {extra} more unread__**"
+                    block += f"  · +{extra} more"
                 unread_blocks.append(block)
 
         if unread_blocks:
-            header = f"📩 Account [{name}] — {len(unread_blocks)} chat(s)"
+            header = _format_account_header(name)
             body = "\n\n".join(unread_blocks)
             await send_notification(header + "\n\n" + body)
             _append_daily_entry(name, len(unread_blocks), body)
