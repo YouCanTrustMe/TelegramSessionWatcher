@@ -157,7 +157,9 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
                 dialog.unread_messages_count > 0
                 and dialog.chat.type.value not in ("channel", "supergroup", "group", "bot")
             ):
-                chat_name = dialog.chat.first_name or dialog.chat.title or "Unknown"
+                first = dialog.chat.first_name or ""
+                last = dialog.chat.last_name or ""
+                chat_name = f"{first} {last}".strip() or dialog.chat.title or "Unknown"
                 log.info(f"[{name}] Unread from: {chat_name}")
                 preview = _format_preview(dialog.top_message)
                 extra = dialog.unread_messages_count - 1
