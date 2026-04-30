@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from datetime import datetime
@@ -290,5 +291,15 @@ async def status_today_callback(client: Client, callback: CallbackQuery):
 async def close_msg_callback(client: Client, callback: CallbackQuery):
     await callback.answer()
     await callback.message.delete()
+
+
+@bot.on_message(filters.command("stats") & owner_filter)
+async def stats_cmd(client: Client, message: Message):
+    try:
+        import server_stats
+        report = await asyncio.to_thread(server_stats.format_report)
+        await message.reply(f"```\n{report}\n```")
+    except Exception as e:
+        await message.reply(f"❌ {e}")
 
 
