@@ -270,7 +270,9 @@ async def send_today_digest(target: Message):
 
     current = header
     for e in entries:
-        block = f"\n**{e['time']} — `{e['account']}`**\n{e['body']}\n"
+        meta = store.get_account(e["account"])
+        conv_icon = "♻️" if (meta and meta.get("last_converted")) else "⬜"
+        block = f"\n**{e['time']} — {conv_icon} `{e['account']}`**\n{e['body']}\n"
         if len(current) + len(block) > 3800:
             await target.reply(current)
             current = block

@@ -30,7 +30,7 @@ def init_db():
                 last_converted TEXT
             )
         """)
-        for col in ("last_converted TEXT", "invalid_reason TEXT"):
+        for col in ("last_converted TEXT", "invalid_reason TEXT", "manually_converted INTEGER"):
             try:
                 conn.execute(f"ALTER TABLE accounts ADD COLUMN {col}")
             except sqlite3.OperationalError:
@@ -71,7 +71,7 @@ def add_account(name: str):
 def get_account(name: str) -> Optional[dict]:
     with _conn() as conn:
         row = conn.execute(
-            """SELECT session_name, added_at, notes, invalid_count, last_reauth, last_unread, last_converted, invalid_reason
+            """SELECT session_name, added_at, notes, invalid_count, last_reauth, last_unread, last_converted, invalid_reason, manually_converted
                FROM accounts WHERE session_name = ?""",
             (name,),
         ).fetchone()
@@ -86,6 +86,7 @@ def get_account(name: str) -> Optional[dict]:
         "last_unread": row[5],
         "last_converted": row[6],
         "invalid_reason": row[7],
+        "manually_converted": bool(row[8]),
     }
 
 
@@ -122,18 +123,18 @@ def mark_unread(name: str):
         )
 
 
-def mark_converted(name: str):
+def mark_converted(name: str, manual: bool = False):
     with _conn() as conn:
         conn.execute(
-            "UPDATE accounts SET last_converted = ? WHERE session_name = ?",
-            (_now(), name),
+            "UPDATE accounts SET last_converted = ?, manually_converted = ? WHERE session_name = ?",
+            (_now(), 1 if manual else 0, name),
         )
 
 
 def clear_converted(name: str):
     with _conn() as conn:
         conn.execute(
-            "UPDATE accounts SET last_converted = NULL WHERE session_name = ?",
+            "UPDATE accounts SET last_converted = NULL, manually_converted = 0 WHERE session_name = ?",
             (name,),
         )
 

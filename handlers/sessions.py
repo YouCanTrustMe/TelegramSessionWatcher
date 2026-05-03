@@ -74,7 +74,7 @@ def _build_list_view(tab: str, page: int):
         if meta.get("notes"):
             icons += "📝"
         if meta.get("last_converted"):
-            icons += "♻️"
+            icons += "🔁" if meta.get("manually_converted") else "♻️"
         return f"{icons} {name}" if icons else name
 
     rows = [[InlineKeyboardButton(_btn_label(n), callback_data=cb_encode(f"la_{tab}", n))] for n in chunk]
@@ -123,7 +123,11 @@ async def handle_list_tab(client: Client, callback: CallbackQuery):
 def _build_account_buttons(tab: str, name: str) -> list:
     meta = store.get_account(name)
     is_converted = bool(meta and meta.get("last_converted"))
-    conv_label = "✖️ Unmark ♻️" if is_converted else "♻️ Mark converted"
+    if is_converted:
+        conv_emoji = "🔁" if (meta and meta.get("manually_converted")) else "♻️"
+        conv_label = f"✖️ Unmark {conv_emoji}"
+    else:
+        conv_label = "♻️ Mark converted"
     buttons = []
     if tab == TAB_ACTIVE:
         buttons.append(InlineKeyboardButton("ℹ️ Info", callback_data=cb_encode(f"info_{tab}", name)))
@@ -529,8 +533,8 @@ async def handle_toggle_converted(client: Client, callback: CallbackQuery):
         store.clear_converted(name)
         await callback.answer("♻️ Conversion mark removed.")
     else:
-        store.mark_converted(name)
-        await callback.answer("♻️ Marked as converted.")
+        store.mark_converted(name, manual=True)
+        await callback.answer("🔁 Marked as converted manually.")
     buttons = _build_account_buttons(tab, name)
     rows = [buttons[i:i+2] for i in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton("« Back to list", callback_data=f"lt:{tab}:0")])
