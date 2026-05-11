@@ -3,7 +3,6 @@ import json
 import os
 import shutil
 import random
-import requests
 from datetime import datetime
 from pyrogram import Client
 from pyrogram.errors import AuthKeyUnregistered, UserDeactivated, FloodWait, SessionRevoked
@@ -11,8 +10,8 @@ from pyrogram.raw.functions.account import UpdateStatus
 from pyrogram.raw.functions.updates import GetState
 from pyrogram.raw.functions.contacts import GetStatuses, GetContacts
 from pyrogram.raw.functions.messages import GetPinnedDialogs
-from config import API_ID, API_HASH, BOT_TOKEN, OWNER_ID, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, DAILY_DIR
-from bot import send_notification
+from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, DAILY_DIR
+from bot import send_notification, update_status_pin
 from logger import get_logger
 import store
 
@@ -48,6 +47,12 @@ def get_batch_for_hour(hour: int) -> list:
     day_offset = datetime.now().timetuple().tm_yday
     sorted_sessions = sorted(all_sessions, key=lambda x: x[0])
     return [s for i, s in enumerate(sorted_sessions) if (i + day_offset) % n == idx]
+
+
+def _next_schedule_hour(current_hour: int) -> str:
+    future = [h for h in SCHEDULE_HOURS if h > current_hour]
+    nxt = min(future) if future else min(SCHEDULE_HOURS)
+    return f"{nxt:02d}:00"
 
 
 def _random_delay() -> float:
@@ -248,19 +253,12 @@ async def run_session(hour: int = None):
                 await asyncio.sleep(delay)
 
         if checked:
-            header = (
-                f"✅ {start_time} — {len(checked)} checked, see messages above"
-                if any_unread
-                else f"✅ {start_time} — {len(checked)} checked, no new messages"
-            )
+            status = "📩 new messages" if any_unread else "✅ no new messages"
+            header = f"📊 {start_time} · {len(checked)} checked · {status}"
+            next_hour = _next_schedule_hour(datetime.now().hour)
             accounts_block = "\n".join(f"{name} — {t}" for name, t in checked)
-            text = f"{header}\n\n<blockquote expandable>{accounts_block}</blockquote>"
-            await asyncio.to_thread(
-                lambda: requests.post(
-                    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                    json={"chat_id": OWNER_ID, "text": text, "parse_mode": "HTML", "disable_notification": True},
-                )
-            )
+            pin_text = f"{header}\nNext: {next_hour}\n\n<blockquote expandable>{accounts_block}</blockquote>"
+            await update_status_pin(pin_text)
 
         if hour is not None:
             _update_batch_state(hour)

@@ -12,6 +12,11 @@ from handlers.invalid import get_invalid_names
 import store
 
 
+@bot.on_message(filters.pinned_message & owner_filter)
+async def delete_pin_service(_client, message: Message):
+    await message.delete()
+
+
 def _load_batch_state() -> dict:
     try:
         with open(BATCH_STATE_FILE) as f:
