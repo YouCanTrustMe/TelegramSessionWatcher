@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from config import OWNER_ID
 from bot import bot, owner_filter
 from config import LOGS_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, STALE_CONVERT_DAYS, DAILY_DIR
 from state import read_state
@@ -12,7 +13,7 @@ from handlers.invalid import get_invalid_names
 import store
 
 
-@bot.on_message(filters.pinned_message & owner_filter)
+@bot.on_message(filters.pinned_message & filters.chat(OWNER_ID))
 async def delete_pin_service(_client, message: Message):
     await message.delete()
 

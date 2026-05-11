@@ -255,7 +255,7 @@ async def run_session(hour: int = None):
         if checked:
             status = "📩 new messages" if any_unread else "✅ no new messages"
             header = f"📊 {start_time} · {len(checked)} checked · {status}"
-            next_hour = _next_schedule_hour(datetime.now().hour)
+            next_hour = _next_schedule_hour(hour if hour is not None else datetime.now().hour)
             accounts_block = "\n".join(f"{name} — {t}" for name, t in checked)
             pin_text = f"{header}\nNext: {next_hour}\n\n<blockquote expandable>{accounts_block}</blockquote>"
             await update_status_pin(pin_text)
