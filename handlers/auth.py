@@ -8,6 +8,7 @@ from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID
 from logger import get_logger
 from handlers.common import pending_auth, pending_note, CANCEL_MARKUP, set_backup_task
+from devices import random_device
 import store
 
 log = get_logger(__name__)
@@ -40,7 +41,9 @@ async def start_code_request(
     extra_state: dict | None = None,
 ) -> bool:
     session_path = os.path.join(SESSIONS_DIR, phone)
-    auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
+    device = random_device()
+    log.info(f"Auth device: {device['device_model']} / {device['system_version']}")
+    auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH, **device)
     state = {"step": "phone", "client": auth_client, "session_path": session_path}
     if extra_state:
         state.update(extra_state)

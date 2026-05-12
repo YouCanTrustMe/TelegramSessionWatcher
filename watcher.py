@@ -122,9 +122,9 @@ def _update_batch_state(hour: int):
     with open(BATCH_STATE_FILE, "w") as f:
         json.dump(state, f)
 
-async def check_account(name: str, session_path: str, _retry: bool = True) -> bool:
+async def check_account(name: str, session_path: str, _retry: bool = True) -> list[str]:
     client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
-    has_unread = False
+    unread_blocks: list[str] = []
     disconnected = False
 
     try:
@@ -133,7 +133,7 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
     except Exception as e:
         log.error(f"[{name}] Connection error: {e}")
         await send_notification(f"⚠️ [{name}] Connection error: {e}")
-        return False
+        return []
 
     try:
         try:
@@ -176,12 +176,9 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
                 unread_blocks.append(block)
 
         if unread_blocks:
-            header = _format_account_header(name)
             body = "\n\n".join(unread_blocks)
-            await send_notification(header + "\n\n" + body)
             _append_daily_entry(name, len(unread_blocks), body)
             store.mark_unread(name)
-            has_unread = True
 
     except asyncio.TimeoutError:
         log.error(f"[{name}] get_dialogs timed out after 60s")
@@ -221,7 +218,7 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> bo
             await client.disconnect()
         log.info(f"[{name}] Disconnected")
 
-    return has_unread
+    return unread_blocks
 
 async def run_session(hour: int = None):
     if _session_lock.locked():
@@ -239,21 +236,39 @@ async def run_session(hour: int = None):
         log.info(f"Starting session — {label}: {len(sessions)} accounts")
 
         start_time = datetime.now().strftime("%H:%M")
-        any_unread = False
+        all_unread: list[tuple[str, list[str]]] = []
         checked = []
         for i, (name, path) in enumerate(sessions):
             check_time = datetime.now().strftime("%H:%M")
-            has_unread = await check_account(name, path)
+            unread_blocks = await check_account(name, path)
             checked.append((name, check_time))
-            if has_unread:
-                any_unread = True
+            if unread_blocks:
+                all_unread.append((name, unread_blocks))
             if i < len(sessions) - 1:
                 delay = _random_delay()
                 log.debug(f"Waiting {delay:.1f}s before next account")
                 await asyncio.sleep(delay)
 
+        if all_unread:
+            parts = []
+            for acc_name, blocks in all_unread:
+                parts.append(_format_account_header(acc_name) + "\n\n" + "\n\n".join(blocks))
+            combined = "\n\n\n".join(parts)
+            chunk_limit = 4000
+            if len(combined) <= chunk_limit:
+                await send_notification(combined)
+            else:
+                chunk, silent = "", False
+                for part in parts:
+                    if chunk and len(chunk) + len(part) + 3 > chunk_limit:
+                        await send_notification(chunk, silent=silent)
+                        chunk, silent = "", True
+                    chunk = (chunk + "\n\n\n" + part).lstrip()
+                if chunk:
+                    await send_notification(chunk, silent=silent)
+
         if checked:
-            status = "📩 new messages" if any_unread else "✅ no new messages"
+            status = "📩 new messages" if all_unread else "✅ no new messages"
             header = f"📊 {start_time} · {len(checked)} checked · {status}"
             next_hour = _next_schedule_hour(hour if hour is not None else datetime.now().hour)
             accounts_block = "\n".join(f"{name} — {t}" for name, t in checked)

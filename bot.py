@@ -25,14 +25,13 @@ async def update_status_pin(text: str):
         try:
             with open(PIN_MSG_FILE) as f:
                 old_id = int(f.read().strip())
-            await asyncio.to_thread(
-                lambda: requests.post(f"{base}/deleteMessage",
-                                      json={"chat_id": OWNER_ID, "message_id": old_id})
+            resp = await asyncio.to_thread(
+                lambda: requests.post(f"{base}/editMessageText",
+                                      json={"chat_id": OWNER_ID, "message_id": old_id,
+                                            "text": text, "parse_mode": "HTML"})
             )
-        except Exception:
-            pass
-        try:
-            os.remove(PIN_MSG_FILE)
+            if resp.json().get("ok"):
+                return
         except Exception:
             pass
 
