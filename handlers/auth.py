@@ -41,15 +41,15 @@ async def start_code_request(
     extra_state: dict | None = None,
 ) -> bool:
     session_path = os.path.join(SESSIONS_DIR, phone)
-    device = random_device()
-    log.info(f"Auth device: {device['device_model']} / {device['system_version']}")
-    auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH, **device)
-    state = {"step": "phone", "client": auth_client, "session_path": session_path}
-    if extra_state:
-        state.update(extra_state)
-    pending_auth[OWNER_ID] = state
 
     try:
+        device = random_device()
+        log.info(f"Auth device: {device['device_model']} / {device['system_version']}")
+        auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH, **device)
+        state = {"step": "phone", "client": auth_client, "session_path": session_path}
+        if extra_state:
+            state.update(extra_state)
+        pending_auth[OWNER_ID] = state
         await auth_client.connect()
         sent = await auth_client.send_code(phone)
         pending_auth[OWNER_ID].update({
