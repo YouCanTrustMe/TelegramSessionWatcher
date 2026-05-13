@@ -301,7 +301,7 @@ async def close_msg_callback(client: Client, callback: CallbackQuery):
     await callback.message.delete()
 
 
-@bot.on_message(filters.command("stats") & owner_filter)
+@bot.on_message(filters.command("load") & owner_filter)
 async def stats_cmd(client: Client, message: Message):
     try:
         import server_stats

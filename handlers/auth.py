@@ -70,7 +70,7 @@ async def add_account_cmd(client: Client, message: Message):
     if OWNER_ID in pending_auth:
         await cleanup_pending(OWNER_ID)
     pending_note.pop(OWNER_ID, None)
-    await message.reply("Send phone number (e.g. +380XXXXXXXXX):", reply_markup=CANCEL_MARKUP)
+    await message.reply("Send phone number (e.g. +XXXXXXXXXXX):", reply_markup=CANCEL_MARKUP)
     pending_auth[OWNER_ID] = {"step": "phone"}
 
 
@@ -121,8 +121,12 @@ async def handle_auth_input(client: Client, message: Message):
             await auth_client.sign_in(state["phone"], state["hash"], code)
             await finish_auth(message, auth_client, state)
         except SessionPasswordNeeded:
+            from pyrogram.raw.functions.account import GetPassword
+            pwd_info = await auth_client.invoke(GetPassword())
+            hint = pwd_info.hint or ""
+            hint_text = f"\nHint: {hint}" if hint else ""
             pending_auth[OWNER_ID]["step"] = "2fa"
-            await message.reply("Enter 2FA password:", reply_markup=CANCEL_MARKUP)
+            await message.reply(f"Enter 2FA password:{hint_text}", reply_markup=CANCEL_MARKUP)
         except (PhoneCodeInvalid, PhoneCodeExpired):
             await message.reply("❌ Invalid or expired code. Please enter the code again:", reply_markup=CANCEL_MARKUP)
         except Exception as e:
