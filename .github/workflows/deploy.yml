@@ -1,0 +1,67 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push cancels an in-flight deploy instead of racing it.
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Syntax check (all files)
+        run: python -m compileall -q .
+      - name: Import check (dummy env)
+        env:
+          API_ID: "1"
+          API_HASH: "ci"
+          BOT_TOKEN: "ci"
+          OWNER_ID: "1"
+        run: python -c "import main"
+
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false   # one server failing must not block the other
+      matrix:
+        include:
+          - name: serv1
+            host_secret: SERV1_HOST
+            key_secret: SERV1_SSH_KEY
+          - name: serv2
+            host_secret: SERV2_HOST
+            key_secret: SERV2_SSH_KEY
+    steps:
+      - name: Deploy to ${{ matrix.name }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets[matrix.host_secret] }}
+          username: ubuntu
+          key: ${{ secrets[matrix.key_secret] }}
+          script_stop: true
+          script: |
+            set -e
+            cd ~/TelegramSessionWatcher
+            # Hard-sync to remote — idempotent, immune to server-side drift.
+            # .env / bot.session / data/ are gitignored, so they are untouched.
+            git fetch origin main
+            git reset --hard origin/main
+            sudo systemctl restart tsw.service
+            sleep 5
+            if ! sudo systemctl is-active tsw.service; then
+              echo "tsw.service is NOT active after restart"
+              exit 1
+            fi
+            echo "deployed and active"
