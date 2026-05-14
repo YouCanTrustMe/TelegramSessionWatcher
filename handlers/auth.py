@@ -13,6 +13,23 @@ import store
 
 log = get_logger(__name__)
 
+_TTL_DAYS_CANDIDATES = (730, 548, 365)
+
+
+async def apply_account_ttl(client: Client) -> int | None:
+    from pyrogram.raw.functions.account import SetAccountTTL
+    from pyrogram.raw.types import AccountDaysTTL
+
+    for days in _TTL_DAYS_CANDIDATES:
+        try:
+            await client.invoke(SetAccountTTL(ttl=AccountDaysTTL(days=days)))
+            log.info(f"Account self-destruct TTL set to {days} days")
+            return days
+        except Exception as e:
+            log.warning(f"SetAccountTTL({days}) rejected: {e}")
+    log.error("Could not set account TTL — all candidates rejected")
+    return None
+
 
 async def cleanup_pending(user_id: int):
     state = pending_auth.pop(user_id, None)
@@ -154,6 +171,8 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
     last = me.last_name or ""
     full_name = f"{first}{last}".strip()
 
+    ttl_days = await apply_account_ttl(auth_client)
+
     await auth_client.disconnect()
 
     old_path = f"{state['session_path']}.session"
@@ -176,6 +195,7 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
 
     del pending_auth[OWNER_ID]
     log.info(f"Account added via bot: {new_name}")
-    await message.reply(f"✅ Account added: `{new_name}`\n⏳ Backup in 3 minutes...")
+    ttl_line = f"\n🗓 Inactivity TTL: {ttl_days}d" if ttl_days else "\n⚠️ TTL not set"
+    await message.reply(f"✅ Account added: `{new_name}`{ttl_line}\n⏳ Backup in 3 minutes...")
 
     set_backup_task(asyncio.create_task(schedule_backup_after_add()))

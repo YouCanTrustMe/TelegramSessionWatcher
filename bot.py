@@ -15,6 +15,21 @@ async def send_notification(text: str, silent: bool = False):
         get_logger(__name__).error(f"Failed to send notification: {e}")
 
 
+async def send_html_notification(text: str, silent: bool = False, reply_markup: dict | None = None):
+    from logger import get_logger
+    base = f"https://api.telegram.org/bot{BOT_TOKEN}"
+    payload = {"chat_id": OWNER_ID, "text": text,
+               "parse_mode": "HTML", "disable_notification": silent}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    try:
+        await asyncio.to_thread(
+            lambda: requests.post(f"{base}/sendMessage", json=payload)
+        )
+    except Exception as e:
+        get_logger(__name__).error(f"Failed to send HTML notification: {e}")
+
+
 async def update_status_pin(text: str):
     from logger import get_logger
     log = get_logger(__name__)

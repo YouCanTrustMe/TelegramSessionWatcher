@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 import os
 import shutil
@@ -11,7 +12,7 @@ from pyrogram.raw.functions.updates import GetState
 from pyrogram.raw.functions.contacts import GetStatuses, GetContacts
 from pyrogram.raw.functions.messages import GetPinnedDialogs
 from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, DAILY_DIR
-from bot import send_notification, update_status_pin
+from bot import send_notification, send_html_notification, update_status_pin
 from logger import get_logger
 import store
 
@@ -64,7 +65,7 @@ def _random_delay() -> float:
 def _format_account_header(name: str) -> str:
     if "_" in name:
         phone, display = name.split("_", 1)
-        return f"📩 {display} (+{phone})"
+        return f"📩 {html.escape(display)} (+{phone})"
     return f"📩 +{name}"
 
 
@@ -99,14 +100,15 @@ def _format_preview(msg) -> str:
     return "[message]"
 
 
-def _append_daily_entry(name: str, chat_count: int, body: str):
+def _append_daily_entry(name: str, blocks: list[str]):
     now = datetime.now()
     path = os.path.join(DAILY_DIR, f"{now.strftime('%Y-%m-%d')}.jsonl")
     entry = {
         "time": now.strftime("%H:%M"),
         "account": name,
-        "chats": chat_count,
-        "body": body,
+        "chats": len(blocks),
+        "blocks": blocks,
+        "body": "\n\n".join(blocks),
     }
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -176,8 +178,7 @@ async def check_account(name: str, session_path: str, _retry: bool = True) -> li
                 unread_blocks.append(block)
 
         if unread_blocks:
-            body = "\n\n".join(unread_blocks)
-            _append_daily_entry(name, len(unread_blocks), body)
+            _append_daily_entry(name, unread_blocks)
             store.mark_unread(name)
 
     except asyncio.TimeoutError:
@@ -228,6 +229,12 @@ async def run_session(hour: int = None):
     async with _session_lock:
         sessions = get_batch_for_hour(hour) if hour is not None else get_all_sessions()
 
+        active = [(n, p) for n, p in sessions if not store.is_in_cooldown(n)]
+        skipped = len(sessions) - len(active)
+        if skipped:
+            log.info(f"Skipping {skipped} account(s) in cooldown")
+        sessions = active
+
         if not sessions:
             log.warning("No sessions found for this batch.")
             return
@@ -235,7 +242,7 @@ async def run_session(hour: int = None):
         label = f"hour {hour}" if hour is not None else "all accounts"
         log.info(f"Starting session — {label}: {len(sessions)} accounts")
 
-        start_time = datetime.now().strftime("%H:%M")
+        start_time = datetime.now().strftime("%d.%m %H:%M")
         all_unread: list[tuple[str, list[str]]] = []
         checked = []
         for i, (name, path) in enumerate(sessions):
@@ -252,20 +259,23 @@ async def run_session(hour: int = None):
         if all_unread:
             parts = []
             for acc_name, blocks in all_unread:
-                parts.append(_format_account_header(acc_name) + "\n\n" + "\n\n".join(blocks))
+                quoted = "\n".join(
+                    f"<blockquote>{html.escape(b)}</blockquote>" for b in blocks
+                )
+                parts.append(_format_account_header(acc_name) + "\n\n" + quoted)
             combined = "\n\n\n".join(parts)
             chunk_limit = 4000
             if len(combined) <= chunk_limit:
-                await send_notification(combined)
+                await send_html_notification(combined)
             else:
                 chunk, silent = "", False
                 for part in parts:
                     if chunk and len(chunk) + len(part) + 3 > chunk_limit:
-                        await send_notification(chunk, silent=silent)
+                        await send_html_notification(chunk, silent=silent)
                         chunk, silent = "", True
                     chunk = (chunk + "\n\n\n" + part).lstrip()
                 if chunk:
-                    await send_notification(chunk, silent=silent)
+                    await send_html_notification(chunk, silent=silent)
 
         if checked:
             status = "📩 new messages" if all_unread else "✅ no new messages"

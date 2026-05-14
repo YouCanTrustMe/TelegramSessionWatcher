@@ -1,11 +1,12 @@
 import asyncio
+import html
 import json
 import os
 from datetime import datetime
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from config import OWNER_ID
-from bot import bot, owner_filter
+from bot import bot, owner_filter, send_html_notification
 from config import LOGS_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, STALE_CONVERT_DAYS, DAILY_DIR
 from state import read_state
 from watcher import get_batch_for_hour, run_session, _session_lock
@@ -229,6 +230,7 @@ def build_stale_report(days: int = STALE_CONVERT_DAYS) -> str | None:
 
 
 _CLOSE_MARKUP = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_msg")]])
+_CLOSE_MARKUP_JSON = {"inline_keyboard": [[{"text": "❌ Close", "callback_data": "close_msg"}]]}
 
 
 async def send_stale_report(target: Message):
@@ -270,22 +272,27 @@ async def send_today_digest(target: Message):
 
     total_chats = sum(e.get("chats", 0) for e in entries)
     header = (
-        f"**📬 Today — {now.strftime('%Y-%m-%d')}**\n"
-        f"`{len(entries)}` account notification(s), `{total_chats}` chat(s)\n"
+        f"<b>📬 Today — {now.strftime('%Y-%m-%d')}</b>\n"
+        f"<code>{len(entries)}</code> account notification(s), "
+        f"<code>{total_chats}</code> chat(s)\n"
     )
 
     current = header
     for e in entries:
         meta = store.get_account(e["account"])
         conv_icon = "♻️" if (meta and meta.get("last_converted")) else "⬜"
-        block = f"\n**{e['time']} — {conv_icon} `{e['account']}`**\n{e['body']}\n"
+        blocks = e.get("blocks") or ([e["body"]] if e.get("body") else [])
+        quoted = "\n".join(
+            f"<blockquote>{html.escape(b)}</blockquote>" for b in blocks
+        )
+        block = f"\n<b>{e['time']} — {conv_icon} {html.escape(e['account'])}</b>\n{quoted}\n"
         if len(current) + len(block) > 3800:
-            await target.reply(current)
+            await send_html_notification(current)
             current = block
         else:
             current += block
     if current.strip():
-        await target.reply(current, reply_markup=_CLOSE_MARKUP)
+        await send_html_notification(current, reply_markup=_CLOSE_MARKUP_JSON)
 
 
 
@@ -299,6 +306,38 @@ async def status_today_callback(client: Client, callback: CallbackQuery):
 async def close_msg_callback(client: Client, callback: CallbackQuery):
     await callback.answer()
     await callback.message.delete()
+
+
+@bot.on_message(filters.command("cooldown") & owner_filter)
+async def cooldown_cmd(client: Client, message: Message):
+    parts = message.text.split()
+
+    if len(parts) >= 2 and parts[1] == "clear":
+        target = parts[2] if len(parts) >= 3 else None
+        if target == "all":
+            names = [n for n, _ in store.get_cooldowns()]
+            for n in names:
+                store.clear_cooldown(n)
+            await message.reply(f"✅ Cooldown cleared on `{len(names)}` account(s).")
+        elif target:
+            store.clear_cooldown(target)
+            await message.reply(f"✅ Cooldown cleared for `{target}`.")
+        else:
+            await message.reply("Usage: /cooldown clear <name|all>")
+        return
+
+    cds = store.get_cooldowns()
+    if not cds:
+        await message.reply("✅ No accounts in cooldown.")
+        return
+
+    now = datetime.now()
+    lines = [f"**🧊 Cooldown — `{len(cds)}` account(s)**\n"]
+    for name, until in sorted(cds, key=lambda x: x[1]):
+        hrs = int((until - now).total_seconds() // 3600)
+        lines.append(f"• `{name}` — until {until.strftime('%m-%d %H:%M')} (~{hrs}h)")
+    lines.append("\n_clear: /cooldown clear <name|all>_")
+    await message.reply("\n".join(lines))
 
 
 @bot.on_message(filters.command("load") & owner_filter)

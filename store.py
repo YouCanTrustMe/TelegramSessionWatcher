@@ -30,7 +30,7 @@ def init_db():
                 last_converted TEXT
             )
         """)
-        for col in ("last_converted TEXT", "invalid_reason TEXT", "manually_converted INTEGER"):
+        for col in ("last_converted TEXT", "invalid_reason TEXT", "manually_converted INTEGER", "cooldown_until TEXT"):
             try:
                 conn.execute(f"ALTER TABLE accounts ADD COLUMN {col}")
             except sqlite3.OperationalError:
@@ -137,6 +137,58 @@ def clear_converted(name: str):
             "UPDATE accounts SET last_converted = NULL, manually_converted = 0 WHERE session_name = ?",
             (name,),
         )
+
+
+def set_cooldown(name: str, until: datetime):
+    add_account(name)
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE accounts SET cooldown_until = ? WHERE session_name = ?",
+            (until.isoformat(timespec="seconds"), name),
+        )
+
+
+def clear_cooldown(name: str):
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE accounts SET cooldown_until = NULL WHERE session_name = ?",
+            (name,),
+        )
+
+
+def get_cooldown(name: str) -> Optional[datetime]:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT cooldown_until FROM accounts WHERE session_name = ?", (name,)
+        ).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        return datetime.fromisoformat(row[0])
+    except ValueError:
+        return None
+
+
+def is_in_cooldown(name: str) -> bool:
+    until = get_cooldown(name)
+    return until is not None and until > datetime.now()
+
+
+def get_cooldowns() -> list[tuple]:
+    now = datetime.now()
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT session_name, cooldown_until FROM accounts WHERE cooldown_until IS NOT NULL"
+        ).fetchall()
+    result = []
+    for name, val in rows:
+        try:
+            dt = datetime.fromisoformat(val)
+        except (ValueError, TypeError):
+            continue
+        if dt > now:
+            result.append((name, dt))
+    return result
 
 
 def get_stale_accounts(days: int) -> list[dict]:
