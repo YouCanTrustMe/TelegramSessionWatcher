@@ -14,6 +14,7 @@ from pyrogram.raw.functions.messages import GetPinnedDialogs
 from config import API_ID, API_HASH, SESSIONS_DIR, INVALID_DIR, SCHEDULE_HOURS, BATCH_STATE_FILE, DAILY_DIR
 from bot import send_notification, send_html_notification, update_status_pin
 from logger import get_logger
+from devices import DEVICE_EXT, load_device
 import store
 
 log = get_logger(__name__)
@@ -21,7 +22,7 @@ _session_lock = asyncio.Lock()
 
 def move_to_invalid(name: str, session_path: str, reason: str = ""):
     dest = os.path.join(INVALID_DIR, f"{name}_invalid")
-    for ext in (".session", ".session-journal"):
+    for ext in (".session", ".session-journal", DEVICE_EXT):
         src = f"{session_path}{ext}"
         if os.path.exists(src):
             shutil.move(src, f"{dest}{ext}")
@@ -125,7 +126,8 @@ def _update_batch_state(hour: int):
         json.dump(state, f)
 
 async def check_account(name: str, session_path: str, _retry: bool = True) -> list[str]:
-    client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
+    device = load_device(session_path)
+    client = Client(session_path, api_id=API_ID, api_hash=API_HASH, **device)
     unread_blocks: list[str] = []
     disconnected = False
 

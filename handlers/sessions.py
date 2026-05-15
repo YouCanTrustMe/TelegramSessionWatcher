@@ -14,6 +14,7 @@ from handlers.common import (
     move_session_files, pending_note, PAGE_SIZE, CANCEL_MARKUP,
 )
 from handlers.invalid import get_invalid_names
+from devices import load_device
 import store
 
 log = get_logger(__name__)
@@ -317,7 +318,8 @@ async def do_info(session_name: str) -> str:
     file_status = "archived" if is_archived else "active"
 
     session_no_ext = os.path.join(base_dir, clean_name)
-    client = Client(session_no_ext, api_id=API_ID, api_hash=API_HASH)
+    device = load_device(session_no_ext)
+    client = Client(session_no_ext, api_id=API_ID, api_hash=API_HASH, **device)
 
     full_name = username = phone = "—"
     account_status = "⚠️ unknown"
@@ -364,6 +366,14 @@ async def do_info(session_name: str) -> str:
         if meta_lines:
             meta_block = "\n" + "\n".join(meta_lines)
 
+    if device:
+        device_line = (
+            f"\nDevice: `{device.get('device_model', '—')}` "
+            f"({device.get('system_version', '—')}, TG {device.get('app_version', '—')})"
+        )
+    else:
+        device_line = "\nDevice: `default (CPython)`"
+
     return (
         f"**Account info:**\n"
         f"Name: `{clean_name}`\n"
@@ -374,6 +384,7 @@ async def do_info(session_name: str) -> str:
         f"File status: `{file_status}`\n"
         f"Size: `{size} bytes`\n"
         f"Last modified: `{modified}`"
+        f"{device_line}"
         f"{meta_block}"
     )
 

@@ -7,8 +7,8 @@ from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeEx
 from bot import bot, owner_filter
 from config import API_ID, API_HASH, SESSIONS_DIR, OWNER_ID
 from logger import get_logger
-from handlers.common import pending_auth, pending_note, CANCEL_MARKUP, set_backup_task
-from devices import random_device
+from handlers.common import pending_auth, pending_note, CANCEL_MARKUP, set_backup_task, move_session_files
+from devices import random_device, save_device
 import store
 
 log = get_logger(__name__)
@@ -43,7 +43,7 @@ async def cleanup_pending(user_id: int):
             pass
     session_path = state.get("session_path")
     if session_path:
-        for ext in [".session", ".session-journal"]:
+        for ext in (".session", ".session-journal", ".device.json"):
             path = f"{session_path}{ext}"
             if os.path.exists(path):
                 os.remove(path)
@@ -63,7 +63,7 @@ async def start_code_request(
         device = random_device()
         log.info(f"Auth device: {device['device_model']} / {device['system_version']}")
         auth_client = Client(session_path, api_id=API_ID, api_hash=API_HASH, **device)
-        state = {"step": "phone", "client": auth_client, "session_path": session_path}
+        state = {"step": "phone", "client": auth_client, "session_path": session_path, "device": device}
         if extra_state:
             state.update(extra_state)
         pending_auth[OWNER_ID] = state
@@ -175,19 +175,20 @@ async def finish_auth(message: Message, auth_client: Client, state: dict):
 
     await auth_client.disconnect()
 
-    old_path = f"{state['session_path']}.session"
+    old_base = state["session_path"]
     phone = state["phone"]
     phone_clean = phone.lstrip("+")
     new_name = f"{phone_clean}_{full_name}" if full_name else phone_clean
-    new_path = os.path.join(SESSIONS_DIR, f"{new_name}.session")
-    os.rename(old_path, new_path)
+    new_base = os.path.join(SESSIONS_DIR, new_name)
+    move_session_files(old_base, new_base)
+
+    device = state.get("device")
+    if device:
+        save_device(new_base, device)
 
     reauth_source = state.get("reauth_source")
     if reauth_source:
-        for ext in (".session", ".session-journal"):
-            src = f"{reauth_source}{ext}"
-            if os.path.exists(src):
-                os.rename(src, f"{reauth_source}_done{ext}")
+        move_session_files(reauth_source, f"{reauth_source}_done")
         log.info(f"Reauth complete, marked as done: {reauth_source}")
         store.mark_reauth(new_name)
     else:

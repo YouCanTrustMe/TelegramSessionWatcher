@@ -1,4 +1,8 @@
+import json
+import os
 import random
+
+DEVICE_EXT = ".device.json"
 
 _PROFILES = [
     {"device_model": "Samsung Galaxy S24 Ultra", "system_version": "Android 14", "app_version": "10.14.5", "lang_code": "ru", "system_lang_code": "en-US"},
@@ -116,3 +120,21 @@ _PYROGRAM_KEYS = {"device_model", "system_version", "app_version", "lang_code"}
 def random_device() -> dict:
     profile = random.choice(_PROFILES)
     return {k: v for k, v in profile.items() if k in _PYROGRAM_KEYS}
+
+
+def device_path(session_base: str) -> str:
+    return f"{session_base}{DEVICE_EXT}"
+
+
+def save_device(session_base: str, device: dict) -> None:
+    with open(device_path(session_base), "w") as f:
+        json.dump(device, f)
+
+
+def load_device(session_base: str) -> dict:
+    try:
+        with open(device_path(session_base)) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return {k: v for k, v in data.items() if k in _PYROGRAM_KEYS}

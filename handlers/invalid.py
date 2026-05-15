@@ -25,7 +25,7 @@ async def handle_invalid_delete_callback(client: Client, callback: CallbackQuery
         await callback.answer("⚠️ Outdated button. Use /list again.", show_alert=True)
         return
     await callback.answer()
-    for ext in (".session", ".session-journal"):
+    for ext in (".session", ".session-journal", ".device.json"):
         path = os.path.join(INVALID_DIR, f"{name}{ext}")
         if os.path.exists(path):
             os.remove(path)

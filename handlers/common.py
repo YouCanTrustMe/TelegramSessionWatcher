@@ -5,6 +5,7 @@ from typing import Optional
 import asyncio
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import SESSIONS_DIR, ARCHIVE_DIR
+from devices import DEVICE_EXT
 
 PAGE_SIZE = 10
 
@@ -49,7 +50,7 @@ def get_session_names(include_archived: bool = False) -> list:
 
 
 def move_session_files(src_base: str, dst_base: str):
-    for ext in (".session", ".session-journal"):
+    for ext in (".session", ".session-journal", DEVICE_EXT):
         src = f"{src_base}{ext}"
         if os.path.exists(src):
             os.rename(src, f"{dst_base}{ext}")

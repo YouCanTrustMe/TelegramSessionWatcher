@@ -3,6 +3,7 @@ import os
 from pyrogram import Client
 from pyrogram.errors import SessionPasswordNeeded, PhoneCodeInvalid, PhoneCodeExpired
 from config import API_ID, API_HASH, SESSIONS_DIR
+from devices import random_device, save_device
 from logger import get_logger
 
 log = get_logger(__name__)
@@ -12,7 +13,9 @@ async def add_account():
 
     session_path = os.path.join(SESSIONS_DIR, phone)
 
-    client = Client(session_path, api_id=API_ID, api_hash=API_HASH)
+    device = random_device()
+    log.info(f"Auth device: {device['device_model']} / {device['system_version']}")
+    client = Client(session_path, api_id=API_ID, api_hash=API_HASH, **device)
 
     await client.connect()
 
@@ -52,11 +55,11 @@ async def add_account():
 
     await client.disconnect()
 
-    old_path = f"{session_path}.session"
     phone_clean = phone.lstrip("+")
     new_name = f"{phone_clean}_{full_name}" if full_name else phone_clean
-    new_path = os.path.join(SESSIONS_DIR, f"{new_name}.session")
-    os.rename(old_path, new_path)
+    new_base = os.path.join(SESSIONS_DIR, new_name)
+    os.rename(f"{session_path}.session", f"{new_base}.session")
+    save_device(new_base, device)
 
     log.info(f"Account saved: {new_name}.session")
     print(f"\n✅ Account added: {new_name}")
